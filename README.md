@@ -4,7 +4,12 @@ An Obsidian plugin for Dungeon Masters. Flag blocks of any note as **player-faci
 
 ## How it works
 
-1. **Flag content.** Select lines and run **Toggle player-facing on selection** (command palette or hotkey). The plugin wraps the selection in lightweight markers:
+1. **Flag content.** Three ways, no syntax to remember:
+   - **Gutter eyes** — hover the left gutter: a closed eye appears at each block. Click it and the whole block (paragraph, callout, code fence, heading) becomes player-facing; the eye opens and stays cyan. Click an open eye to revoke.
+   - **Right-click** — *Show block/selection to players* or *Hide from players*.
+   - **Command palette** — *Toggle player-facing on selection or block* (assignable to a hotkey).
+
+   Under the hood the plugin wraps content in lightweight markers:
 
    ```
    ::pf

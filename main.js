@@ -362,15 +362,37 @@ function pfnGutter(getToken) {
         return EYE_OFF;
       return null;
     },
-    lineMarkerChange: (update) => update.docChanged || update.viewportChanged,
+    lineMarkerChange: (update) => update.docChanged || update.viewportChanged || update.geometryChanged,
     domEventHandlers: {
-      mousedown(view, lineBlock) {
-        const lineNo = view.state.doc.lineAt(lineBlock.from).number - 1;
-        return toggleAtLineCM(view, lineNo, getToken());
+      mousedown(view, lineBlock, event) {
+        const token = getToken();
+        const e = event;
+        const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
+        let lineNo = view.state.doc.lineAt(pos).number - 1;
+        const { lines } = parsedDoc(view.state.doc, token);
+        if (lines[lineNo]?.trim() === "") {
+          for (let d = 1; d <= 3 && lineNo + d < lines.length; d++) {
+            if (lines[lineNo + d].trim() !== "") {
+              lineNo += d;
+              break;
+            }
+          }
+        }
+        const now = Date.now();
+        if (lastToggle.line === lineNo && now - lastToggle.time < 350)
+          return true;
+        if (toggleAtLineCM(view, lineNo, token)) {
+          lastToggle = { line: lineNo, time: now };
+        }
+        return true;
+      },
+      dblclick() {
+        return true;
       }
     }
   });
 }
+var lastToggle = { line: -1, time: 0 };
 function stripMarkersFromRendered(el, token) {
   const re = new RegExp(`^::\\/?${token.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`);
   const candidates = el.querySelectorAll("p, li");

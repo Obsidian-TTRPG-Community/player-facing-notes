@@ -1,6 +1,6 @@
-import { Editor, MarkdownView, Plugin, TFile, debounce } from "obsidian";
-import { pfnEditorExtension, stripMarkersFromRendered } from "./editor";
-import { isEndMarker, isStartMarker, wrapLines } from "./parser";
+import { Editor, Menu, Plugin, TFile, debounce } from "obsidian";
+import { pfnEditorExtension, pfnGutter, stripMarkersFromRendered } from "./editor";
+import { EditPlan, findRegions, planToggle, planWrapRange, regionContaining } from "./parser";
 import { DEFAULT_SETTINGS, PfnSettings, PfnSettingTab } from "./settings";
 import { PlayerSync } from "./sync";
 
@@ -11,18 +11,66 @@ export default class PlayerFacingNotesPlugin extends Plugin {
     await this.loadSettings();
     this.addSettingTab(new PfnSettingTab(this.app, this));
 
-    // Live Preview decorations
-    this.registerEditorExtension(pfnEditorExtension(() => this.settings.token));
+    // Live Preview decorations + eye gutter
+    this.registerEditorExtension([
+      pfnEditorExtension(() => this.settings.token),
+      pfnGutter(() => this.settings.token),
+    ]);
 
     // Reading view: hide markers
     this.registerMarkdownPostProcessor((el) =>
       stripMarkersFromRendered(el, this.settings.token)
     );
 
+    // Right-click menu
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor) => {
+        const token = this.settings.token;
+        const lines = editor.getValue().split("\n");
+        const cursorLine = editor.getCursor("from").line;
+        const inRegion = !!regionContaining(findRegions(lines, token), cursorLine);
+
+        if (inRegion) {
+          menu.addItem((item) =>
+            item
+              .setTitle("Hide from players")
+              .setIcon("eye-off")
+              .setSection("pfn")
+              .onClick(() => this.applyPlan(editor, planToggle(lines, cursorLine, token)))
+          );
+        } else {
+          const hasSelection = editor.somethingSelected();
+          menu.addItem((item) =>
+            item
+              .setTitle(hasSelection ? "Show selection to players" : "Show block to players")
+              .setIcon("eye")
+              .setSection("pfn")
+              .onClick(() => {
+                const ls = editor.getValue().split("\n");
+                const plan = hasSelection
+                  ? planWrapRange(ls, editor.getCursor("from").line, editor.getCursor("to").line, token)
+                  : planToggle(ls, editor.getCursor("from").line, token);
+                this.applyPlan(editor, plan);
+              })
+          );
+        }
+      })
+    );
+
     this.addCommand({
       id: "toggle-player-facing",
-      name: "Toggle player-facing on selection",
-      editorCallback: (editor) => this.toggleSelection(editor),
+      name: "Toggle player-facing on selection or block",
+      editorCallback: (editor) => {
+        const token = this.settings.token;
+        const lines = editor.getValue().split("\n");
+        const from = editor.getCursor("from").line;
+        const to = editor.getCursor("to").line;
+        const plan =
+          editor.somethingSelected() && from !== to
+            ? planWrapRange(lines, from, to, token) ?? planToggle(lines, from, token)
+            : planToggle(lines, from, token);
+        this.applyPlan(editor, plan);
+      },
     });
 
     this.addCommand({
@@ -66,51 +114,33 @@ export default class PlayerFacingNotesPlugin extends Plugin {
     );
   }
 
-  /** Wrap selected lines in markers, or unwrap if the selection is already a region. */
-  private toggleSelection(editor: Editor) {
-    const token = this.settings.token;
-    const from = editor.getCursor("from");
-    const to = editor.getCursor("to");
-    let first = from.line;
-    let last = to.line;
-    // If the cursor sits on/inside an existing region boundary pair, unwrap it.
-    const lineCount = editor.lineCount();
-    let start = -1;
-    for (let i = first; i >= 0; i--) {
-      if (isEndMarker(editor.getLine(i), token) && i < first) break;
-      if (isStartMarker(editor.getLine(i), token)) {
-        start = i;
-        break;
-      }
+  /** Apply a wrap/unwrap plan through the Obsidian editor API. */
+  private applyPlan(editor: Editor, plan: EditPlan) {
+    if (!plan) return;
+    if (plan.kind === "unwrap") {
+      // Delete the end marker line first so start indices stay valid.
+      if (plan.endLine !== null) this.deleteLine(editor, plan.endLine);
+      this.deleteLine(editor, plan.startLine);
+    } else {
+      // Insert end marker first so the start insertion doesn't shift indices.
+      const endLineText = editor.getLine(plan.to);
+      editor.replaceRange("\n" + plan.endMarker, { line: plan.to, ch: endLineText.length });
+      editor.replaceRange(plan.startMarker + "\n", { line: plan.from, ch: 0 });
     }
-    if (start >= 0) {
-      for (let j = Math.max(start + 1, last); j < lineCount; j++) {
-        if (isStartMarker(editor.getLine(j), token) && j > start) break;
-        if (isEndMarker(editor.getLine(j), token)) {
-          // Unwrap: delete end marker line first, then start marker line.
-          editor.replaceRange(
-            "",
-            { line: j, ch: 0 },
-            { line: j + 1, ch: 0 }
-          );
-          editor.replaceRange(
-            "",
-            { line: start, ch: 0 },
-            { line: start + 1, ch: 0 }
-          );
-          return;
-        }
-      }
+  }
+
+  private deleteLine(editor: Editor, line: number) {
+    const last = editor.lineCount() - 1;
+    if (line < last) {
+      editor.replaceRange("", { line, ch: 0 }, { line: line + 1, ch: 0 });
+    } else {
+      const prevLen = line > 0 ? editor.getLine(line - 1).length : 0;
+      editor.replaceRange(
+        "",
+        line > 0 ? { line: line - 1, ch: prevLen } : { line, ch: 0 },
+        { line, ch: editor.getLine(line).length }
+      );
     }
-    // Wrap: full lines of the selection.
-    const lines: string[] = [];
-    for (let i = first; i <= last; i++) lines.push(editor.getLine(i));
-    const wrapped = wrapLines(lines, token).join("\n");
-    editor.replaceRange(
-      wrapped + "\n",
-      { line: first, ch: 0 },
-      { line: last + 1, ch: 0 }
-    );
   }
 
   async loadSettings() {

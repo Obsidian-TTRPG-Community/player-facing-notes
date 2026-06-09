@@ -114,9 +114,103 @@ function buildPlayerCopy(source, opts, extraFrontmatter = {}) {
   out.push("");
   return { content: out.join("\n"), regionCount: regions.length };
 }
-function wrapLines(lines, token) {
-  const prefix = (lines.find((l) => l.trim() !== "") ?? "").match(/^((?:\s{0,3}>\s?)*)/)?.[1] ?? "";
-  return [`${prefix}::${token}`, ...lines, `${prefix}::/${token}`];
+var isBlockquote = (l) => /^\s{0,3}>/.test(l);
+var isFenceDelim = (l) => /^\s{0,3}(```|~~~)/.test(l);
+var blockquotePrefix = (l) => l.match(/^((?:\s{0,3}>\s?)*)/)?.[1] ?? "";
+function regionContaining(regions, line) {
+  return regions.find((r) => line >= r.startLine && line <= r.endLine) ?? null;
+}
+function blockAt(lines, idx, token) {
+  if (idx < 0 || idx >= lines.length)
+    return null;
+  const fm = frontmatterRange(lines);
+  const start = fm ? fm[1] : 0;
+  if (idx < start)
+    return null;
+  const line = lines[idx];
+  const isMarker = (l) => markerRegex(token).test(l);
+  let fenceOpen = -1;
+  let prevOpen = -1;
+  for (let i = start; i <= idx; i++) {
+    if (isFenceDelim(lines[i])) {
+      prevOpen = fenceOpen;
+      fenceOpen = fenceOpen === -1 ? i : -1;
+    }
+  }
+  if (fenceOpen === -1 && isFenceDelim(lines[idx]) && prevOpen !== -1) {
+    return { from: prevOpen, to: idx };
+  }
+  if (fenceOpen !== -1) {
+    const open = fenceOpen;
+    let close = lines.length - 1;
+    for (let i = open + 1; i < lines.length; i++) {
+      if (isFenceDelim(lines[i])) {
+        close = i;
+        break;
+      }
+    }
+    return { from: open, to: close };
+  }
+  if (line.trim() === "" || isMarker(line))
+    return null;
+  if (/^\s{0,3}#{1,6}\s/.test(line))
+    return { from: idx, to: idx };
+  if (isBlockquote(line)) {
+    let from2 = idx;
+    let to2 = idx;
+    while (from2 > start && isBlockquote(lines[from2 - 1]) && !isMarker(lines[from2 - 1]))
+      from2--;
+    while (to2 < lines.length - 1 && isBlockquote(lines[to2 + 1]) && !isMarker(lines[to2 + 1]))
+      to2++;
+    return { from: from2, to: to2 };
+  }
+  const boundary = (l) => l.trim() === "" || isMarker(l) || isBlockquote(l) || isFenceDelim(l) || /^\s{0,3}#{1,6}\s/.test(l);
+  let from = idx;
+  let to = idx;
+  while (from > start && !boundary(lines[from - 1]))
+    from--;
+  while (to < lines.length - 1 && !boundary(lines[to + 1]))
+    to++;
+  return { from, to };
+}
+function markersFor(lines, from, to, token) {
+  let startPrefix = "";
+  let endPrefix = "";
+  if (isBlockquote(lines[from]) && from > 0 && isBlockquote(lines[from - 1]))
+    startPrefix = blockquotePrefix(lines[from]);
+  if (isBlockquote(lines[to]) && to < lines.length - 1 && isBlockquote(lines[to + 1]))
+    endPrefix = blockquotePrefix(lines[to]);
+  return { start: `${startPrefix}::${token}`, end: `${endPrefix}::/${token}` };
+}
+function planToggle(lines, idx, token) {
+  const region = regionContaining(findRegions(lines, token), idx);
+  if (region) {
+    return {
+      kind: "unwrap",
+      startLine: region.startLine,
+      endLine: region.unclosed ? null : region.endLine
+    };
+  }
+  const block = blockAt(lines, idx, token);
+  if (!block)
+    return null;
+  const m = markersFor(lines, block.from, block.to, token);
+  return { kind: "wrap", from: block.from, to: block.to, startMarker: m.start, endMarker: m.end };
+}
+function planWrapRange(lines, from, to, token) {
+  while (from < to && lines[from].trim() === "")
+    from++;
+  while (to > from && lines[to].trim() === "")
+    to--;
+  if (lines[from].trim() === "")
+    return null;
+  const regions = findRegions(lines, token);
+  for (let i = from; i <= to; i++) {
+    if (regionContaining(regions, i) || markerRegex(token).test(lines[i]))
+      return null;
+  }
+  const m = markersFor(lines, from, to, token);
+  return { kind: "wrap", from, to, startMarker: m.start, endMarker: m.end };
 }
 
 // src/editor.ts
@@ -191,6 +285,91 @@ function pfnEditorExtension(getToken) {
     },
     { decorations: (v) => v.decorations }
   );
+}
+var EYE_OPEN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+var EYE_CLOSED = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+var EyeMarker = class extends import_view.GutterMarker {
+  constructor(on) {
+    super();
+    this.on = on;
+  }
+  eq(other) {
+    return other.on === this.on;
+  }
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = this.on ? "pfn-eye pfn-eye-on" : "pfn-eye pfn-eye-off";
+    el.innerHTML = this.on ? EYE_OPEN : EYE_CLOSED;
+    el.setAttribute(
+      "aria-label",
+      this.on ? "Player-facing \u2014 click to hide from players" : "DM-only \u2014 click to show players"
+    );
+    return el;
+  }
+};
+var EYE_ON = new EyeMarker(true);
+var EYE_OFF = new EyeMarker(false);
+var docCache = /* @__PURE__ */ new WeakMap();
+function parsedDoc(doc, token) {
+  let c = docCache.get(doc);
+  if (!c) {
+    const lines = doc.toString().split("\n");
+    c = { lines, regions: findRegions(lines, token) };
+    docCache.set(doc, c);
+  }
+  return c;
+}
+function toggleAtLineCM(view, idx, token) {
+  const { lines } = parsedDoc(view.state.doc, token);
+  const plan = planToggle(lines, idx, token);
+  if (!plan)
+    return false;
+  const doc = view.state.doc;
+  if (plan.kind === "unwrap") {
+    const changes = [];
+    const del = (lineIdx) => {
+      const l = doc.line(lineIdx + 1);
+      changes.push({ from: l.from > 0 ? l.from - 1 : l.from, to: l.to });
+    };
+    del(plan.startLine);
+    if (plan.endLine !== null)
+      del(plan.endLine);
+    view.dispatch({ changes });
+  } else {
+    const first = doc.line(plan.from + 1);
+    const last = doc.line(plan.to + 1);
+    view.dispatch({
+      changes: [
+        { from: first.from, to: first.from, insert: plan.startMarker + "\n" },
+        { from: last.to, to: last.to, insert: "\n" + plan.endMarker }
+      ]
+    });
+  }
+  return true;
+}
+function pfnGutter(getToken) {
+  return (0, import_view.gutter)({
+    class: "pfn-gutter",
+    lineMarker(view, lineBlock) {
+      const token = getToken();
+      const lineNo = view.state.doc.lineAt(lineBlock.from).number - 1;
+      const { lines, regions } = parsedDoc(view.state.doc, token);
+      const region = regionContaining(regions, lineNo);
+      if (region)
+        return region.startLine === lineNo ? EYE_ON : null;
+      const block = blockAt(lines, lineNo, token);
+      if (block && block.from === lineNo)
+        return EYE_OFF;
+      return null;
+    },
+    lineMarkerChange: (update) => update.docChanged || update.viewportChanged,
+    domEventHandlers: {
+      mousedown(view, lineBlock) {
+        const lineNo = view.state.doc.lineAt(lineBlock.from).number - 1;
+        return toggleAtLineCM(view, lineNo, getToken());
+      }
+    }
+  });
 }
 function stripMarkersFromRendered(el, token) {
   const re = new RegExp(`^::\\/?${token.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`);
@@ -371,14 +550,46 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new PfnSettingTab(this.app, this));
-    this.registerEditorExtension(pfnEditorExtension(() => this.settings.token));
+    this.registerEditorExtension([
+      pfnEditorExtension(() => this.settings.token),
+      pfnGutter(() => this.settings.token)
+    ]);
     this.registerMarkdownPostProcessor(
       (el) => stripMarkersFromRendered(el, this.settings.token)
     );
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor) => {
+        const token = this.settings.token;
+        const lines = editor.getValue().split("\n");
+        const cursorLine = editor.getCursor("from").line;
+        const inRegion = !!regionContaining(findRegions(lines, token), cursorLine);
+        if (inRegion) {
+          menu.addItem(
+            (item) => item.setTitle("Hide from players").setIcon("eye-off").setSection("pfn").onClick(() => this.applyPlan(editor, planToggle(lines, cursorLine, token)))
+          );
+        } else {
+          const hasSelection = editor.somethingSelected();
+          menu.addItem(
+            (item) => item.setTitle(hasSelection ? "Show selection to players" : "Show block to players").setIcon("eye").setSection("pfn").onClick(() => {
+              const ls = editor.getValue().split("\n");
+              const plan = hasSelection ? planWrapRange(ls, editor.getCursor("from").line, editor.getCursor("to").line, token) : planToggle(ls, editor.getCursor("from").line, token);
+              this.applyPlan(editor, plan);
+            })
+          );
+        }
+      })
+    );
     this.addCommand({
       id: "toggle-player-facing",
-      name: "Toggle player-facing on selection",
-      editorCallback: (editor) => this.toggleSelection(editor)
+      name: "Toggle player-facing on selection or block",
+      editorCallback: (editor) => {
+        const token = this.settings.token;
+        const lines = editor.getValue().split("\n");
+        const from = editor.getCursor("from").line;
+        const to = editor.getCursor("to").line;
+        const plan = editor.somethingSelected() && from !== to ? planWrapRange(lines, from, to, token) ?? planToggle(lines, from, token) : planToggle(lines, from, token);
+        this.applyPlan(editor, plan);
+      }
     });
     this.addCommand({
       id: "sync-current-note",
@@ -415,51 +626,32 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
       })
     );
   }
-  /** Wrap selected lines in markers, or unwrap if the selection is already a region. */
-  toggleSelection(editor) {
-    const token = this.settings.token;
-    const from = editor.getCursor("from");
-    const to = editor.getCursor("to");
-    let first = from.line;
-    let last = to.line;
-    const lineCount = editor.lineCount();
-    let start = -1;
-    for (let i = first; i >= 0; i--) {
-      if (isEndMarker(editor.getLine(i), token) && i < first)
-        break;
-      if (isStartMarker(editor.getLine(i), token)) {
-        start = i;
-        break;
-      }
+  /** Apply a wrap/unwrap plan through the Obsidian editor API. */
+  applyPlan(editor, plan) {
+    if (!plan)
+      return;
+    if (plan.kind === "unwrap") {
+      if (plan.endLine !== null)
+        this.deleteLine(editor, plan.endLine);
+      this.deleteLine(editor, plan.startLine);
+    } else {
+      const endLineText = editor.getLine(plan.to);
+      editor.replaceRange("\n" + plan.endMarker, { line: plan.to, ch: endLineText.length });
+      editor.replaceRange(plan.startMarker + "\n", { line: plan.from, ch: 0 });
     }
-    if (start >= 0) {
-      for (let j = Math.max(start + 1, last); j < lineCount; j++) {
-        if (isStartMarker(editor.getLine(j), token) && j > start)
-          break;
-        if (isEndMarker(editor.getLine(j), token)) {
-          editor.replaceRange(
-            "",
-            { line: j, ch: 0 },
-            { line: j + 1, ch: 0 }
-          );
-          editor.replaceRange(
-            "",
-            { line: start, ch: 0 },
-            { line: start + 1, ch: 0 }
-          );
-          return;
-        }
-      }
+  }
+  deleteLine(editor, line) {
+    const last = editor.lineCount() - 1;
+    if (line < last) {
+      editor.replaceRange("", { line, ch: 0 }, { line: line + 1, ch: 0 });
+    } else {
+      const prevLen = line > 0 ? editor.getLine(line - 1).length : 0;
+      editor.replaceRange(
+        "",
+        line > 0 ? { line: line - 1, ch: prevLen } : { line, ch: 0 },
+        { line, ch: editor.getLine(line).length }
+      );
     }
-    const lines = [];
-    for (let i = first; i <= last; i++)
-      lines.push(editor.getLine(i));
-    const wrapped = wrapLines(lines, token).join("\n");
-    editor.replaceRange(
-      wrapped + "\n",
-      { line: first, ch: 0 },
-      { line: last + 1, ch: 0 }
-    );
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());

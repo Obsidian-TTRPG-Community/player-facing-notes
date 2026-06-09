@@ -149,3 +149,169 @@ export function wrapLines(lines: string[], token: string): string[] {
   const prefix = (lines.find((l) => l.trim() !== "") ?? "").match(/^((?:\s{0,3}>\s?)*)/)?.[1] ?? "";
   return [`${prefix}::${token}`, ...lines, `${prefix}::/${token}`];
 }
+
+// ---------------------------------------------------------------------------
+// Block detection & toggle planning (for gutter eyes / context menu)
+// ---------------------------------------------------------------------------
+
+export interface BlockRange {
+  /** 0-based inclusive line range. */
+  from: number;
+  to: number;
+}
+
+const isBlockquote = (l: string) => /^\s{0,3}>/.test(l);
+const isFenceDelim = (l: string) => /^\s{0,3}(```|~~~)/.test(l);
+const blockquotePrefix = (l: string) =>
+  l.match(/^((?:\s{0,3}>\s?)*)/)?.[1] ?? "";
+
+/** Region containing the given line (markers inclusive), or null. */
+export function regionContaining(
+  regions: PfRegion[],
+  line: number
+): PfRegion | null {
+  return regions.find((r) => line >= r.startLine && line <= r.endLine) ?? null;
+}
+
+/**
+ * The block (paragraph, blockquote/callout run, fenced code, table, heading)
+ * containing the given line. Returns null for blank lines, marker lines and
+ * frontmatter. Blocks never cross marker lines.
+ */
+export function blockAt(
+  lines: string[],
+  idx: number,
+  token: string
+): BlockRange | null {
+  if (idx < 0 || idx >= lines.length) return null;
+  const fm = frontmatterRange(lines);
+  const start = fm ? fm[1] : 0;
+  if (idx < start) return null;
+  const line = lines[idx];
+  const isMarker = (l: string) => markerRegex(token).test(l);
+
+  // Fenced code block? (checked first: blank/marker-looking lines inside a
+  // fence are literal content and belong to the fence block)
+  let fenceOpen = -1;
+  let prevOpen = -1;
+  for (let i = start; i <= idx; i++) {
+    if (isFenceDelim(lines[i])) {
+      prevOpen = fenceOpen;
+      fenceOpen = fenceOpen === -1 ? i : -1;
+    }
+  }
+  // idx on a closing delim: the fence it closes is prevOpen.
+  if (fenceOpen === -1 && isFenceDelim(lines[idx]) && prevOpen !== -1) {
+    return { from: prevOpen, to: idx };
+  }
+  if (fenceOpen !== -1) {
+    const open = fenceOpen;
+    let close = lines.length - 1;
+    for (let i = open + 1; i < lines.length; i++) {
+      if (isFenceDelim(lines[i])) {
+        close = i;
+        break;
+      }
+    }
+    return { from: open, to: close };
+  }
+
+  if (line.trim() === "" || isMarker(line)) return null;
+
+  // Heading: standalone block.
+  if (/^\s{0,3}#{1,6}\s/.test(line)) return { from: idx, to: idx };
+
+  // Blockquote / callout run.
+  if (isBlockquote(line)) {
+    let from = idx;
+    let to = idx;
+    while (from > start && isBlockquote(lines[from - 1]) && !isMarker(lines[from - 1])) from--;
+    while (to < lines.length - 1 && isBlockquote(lines[to + 1]) && !isMarker(lines[to + 1])) to++;
+    return { from, to };
+  }
+
+  // Paragraph / list / table: contiguous non-blank, non-marker, non-bq lines.
+  const boundary = (l: string) =>
+    l.trim() === "" || isMarker(l) || isBlockquote(l) || isFenceDelim(l) || /^\s{0,3}#{1,6}\s/.test(l);
+  let from = idx;
+  let to = idx;
+  while (from > start && !boundary(lines[from - 1])) from--;
+  while (to < lines.length - 1 && !boundary(lines[to + 1])) to++;
+  return { from, to };
+}
+
+/**
+ * Compute the marker lines for wrapping [from, to]. Markers go *outside* a
+ * blockquote when the range starts/ends the quote run (so callout syntax is
+ * preserved), and *inside* (prefixed) when the range is partial.
+ */
+export function markersFor(
+  lines: string[],
+  from: number,
+  to: number,
+  token: string
+): { start: string; end: string } {
+  let startPrefix = "";
+  let endPrefix = "";
+  if (isBlockquote(lines[from]) && from > 0 && isBlockquote(lines[from - 1]))
+    startPrefix = blockquotePrefix(lines[from]);
+  if (isBlockquote(lines[to]) && to < lines.length - 1 && isBlockquote(lines[to + 1]))
+    endPrefix = blockquotePrefix(lines[to]);
+  return { start: `${startPrefix}::${token}`, end: `${endPrefix}::/${token}` };
+}
+
+export type EditPlan =
+  | {
+      kind: "unwrap";
+      /** Line index of the start marker. */
+      startLine: number;
+      /** Line index of the end marker, or null if the region is unclosed. */
+      endLine: number | null;
+    }
+  | {
+      kind: "wrap";
+      from: number;
+      to: number;
+      startMarker: string;
+      endMarker: string;
+    }
+  | null;
+
+/** Plan a one-click toggle at the given line (gutter eye / block toggle). */
+export function planToggle(
+  lines: string[],
+  idx: number,
+  token: string
+): EditPlan {
+  const region = regionContaining(findRegions(lines, token), idx);
+  if (region) {
+    return {
+      kind: "unwrap",
+      startLine: region.startLine,
+      endLine: region.unclosed ? null : region.endLine,
+    };
+  }
+  const block = blockAt(lines, idx, token);
+  if (!block) return null;
+  const m = markersFor(lines, block.from, block.to, token);
+  return { kind: "wrap", from: block.from, to: block.to, startMarker: m.start, endMarker: m.end };
+}
+
+/** Plan wrapping an explicit line range (selection). Null if it overlaps a region. */
+export function planWrapRange(
+  lines: string[],
+  from: number,
+  to: number,
+  token: string
+): EditPlan {
+  // Trim blank edges.
+  while (from < to && lines[from].trim() === "") from++;
+  while (to > from && lines[to].trim() === "") to--;
+  if (lines[from].trim() === "") return null;
+  const regions = findRegions(lines, token);
+  for (let i = from; i <= to; i++) {
+    if (regionContaining(regions, i) || markerRegex(token).test(lines[i])) return null;
+  }
+  const m = markersFor(lines, from, to, token);
+  return { kind: "wrap", from, to, startMarker: m.start, endMarker: m.end };
+}

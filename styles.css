@@ -1,5 +1,41 @@
 /* Player Facing Notes */
 
+/* Eye gutter */
+.pfn-gutter {
+  width: 22px;
+}
+
+.pfn-eye {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.pfn-eye-on {
+  color: var(--color-cyan, #00bcd4);
+}
+
+.pfn-eye-off {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.cm-editor:hover .pfn-eye-off {
+  opacity: 0.35;
+}
+
+.pfn-eye-off:hover {
+  opacity: 1 !important;
+  color: var(--text-normal);
+}
+
+.pfn-eye-on:hover {
+  filter: brightness(1.3);
+}
+
 /* Region tint + left border in Live Preview */
 .pfn-line {
   border-left: 3px solid var(--color-cyan, #00bcd4);
@@ -14,23 +50,4 @@
   border-bottom-left-radius: 4px;
 }
 
-/* Marker pills shown in place of ::pf / ::/pf lines */
-.pfn-pill {
-  display: inline-block;
-  font-size: 0.7em;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--color-cyan, #00bcd4);
-  background: color-mix(in srgb, var(--color-cyan, #00bcd4) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-cyan, #00bcd4) 40%, transparent);
-  border-radius: 999px;
-  padding: 0 8px;
-  line-height: 1.6;
-  cursor: text;
-  user-select: none;
-}
-
-.pfn-pill-end {
-  padding: 0 6px;
-}
+/* Marker pills shown in place of 

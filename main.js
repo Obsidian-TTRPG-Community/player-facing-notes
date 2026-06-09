@@ -433,7 +433,8 @@ var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   token: "pf",
   outputFolder: "_player",
-  autoSync: false
+  autoSync: false,
+  contextMenu: true
 };
 var PfnSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -452,6 +453,12 @@ var PfnSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Player copies mirror your vault structure inside this folder. Publish only this folder.").addText(
       (t) => t.setValue(this.plugin.settings.outputFolder).onChange(async (v) => {
         this.plugin.settings.outputFolder = (v.trim() || "_player").replace(/\/+$/, "");
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Right-click menu").setDesc("Show 'Show to players' / 'Hide from players' in the editor context menu.").addToggle(
+      (t) => t.setValue(this.plugin.settings.contextMenu).onChange(async (v) => {
+        this.plugin.settings.contextMenu = v;
         await this.plugin.saveSettings();
       })
     );
@@ -650,6 +657,8 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
     );
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
+        if (!this.settings.contextMenu)
+          return;
         const token = this.settings.token;
         const lines = editor.getValue().split("\n");
         const cursorLine = editor.getCursor("from").line;

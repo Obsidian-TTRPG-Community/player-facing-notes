@@ -25,6 +25,7 @@ export default class PlayerFacingNotesPlugin extends Plugin {
     // Right-click menu
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor) => {
+        if (!this.settings.contextMenu) return;
         const token = this.settings.token;
         const lines = editor.getValue().split("\n");
         const cursorLine = editor.getCursor("from").line;

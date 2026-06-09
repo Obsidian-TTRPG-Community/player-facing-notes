@@ -1,6 +1,6 @@
 {
   "name": "player-facing-notes",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Obsidian plugin: flag content blocks as player-facing; publish only those blocks.",
   "main": "main.js",
   "scripts": {

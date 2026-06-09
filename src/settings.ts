@@ -50,7 +50,7 @@ export class PfnSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Right-click menu")
-      .setDesc("Show 'Show to players' / 'Hide from players' in the editor context menu.")
+      .setDesc("Add player visibility actions to the editor context menu.")
       .addToggle((t) =>
         t.setValue(this.plugin.settings.contextMenu).onChange(async (v) => {
           this.plugin.settings.contextMenu = v;

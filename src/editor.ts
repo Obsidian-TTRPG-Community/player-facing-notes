@@ -9,7 +9,8 @@ import {
   WidgetType,
   gutter,
 } from "@codemirror/view";
-import type { Text } from "@codemirror/state";
+import type { Text as CMText } from "@codemirror/state";
+import { setIcon } from "obsidian";
 import {
   PfRegion,
   blockAt,
@@ -28,7 +29,7 @@ class MarkerPill extends WidgetType {
     return other.kind === this.kind;
   }
   toDOM(): HTMLElement {
-    const el = document.createElement("span");
+    const el = activeDocument.createElement("span");
     el.className = `pfn-pill pfn-pill-${this.kind}`;
     el.textContent = this.kind === "start" ? "▾ player-facing" : "▴";
     el.setAttribute("aria-label", this.kind === "start" ? "Start of player-facing content" : "End of player-facing content");
@@ -105,11 +106,6 @@ export function pfnEditorExtension(getToken: () => string) {
 // Gutter eyes (Realm Works-style per-block toggles)
 // ---------------------------------------------------------------------------
 
-const EYE_OPEN =
-  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
-const EYE_CLOSED =
-  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
-
 class EyeMarker extends GutterMarker {
   constructor(private on: boolean) {
     super();
@@ -118,9 +114,9 @@ class EyeMarker extends GutterMarker {
     return other.on === this.on;
   }
   toDOM(): Node {
-    const el = document.createElement("span");
+    const el = activeDocument.createElement("span");
     el.className = this.on ? "pfn-eye pfn-eye-on" : "pfn-eye pfn-eye-off";
-    el.innerHTML = this.on ? EYE_OPEN : EYE_CLOSED;
+    setIcon(el, this.on ? "eye" : "eye-off");
     el.setAttribute(
       "aria-label",
       this.on ? "Player-facing — click to hide from players" : "DM-only — click to show players"
@@ -133,8 +129,8 @@ const EYE_ON = new EyeMarker(true);
 const EYE_OFF = new EyeMarker(false);
 
 // Cache parsed lines/regions per document snapshot.
-const docCache = new WeakMap<Text, { lines: string[]; regions: PfRegion[] }>();
-function parsedDoc(doc: Text, token: string) {
+const docCache = new WeakMap<CMText, { lines: string[]; regions: PfRegion[] }>();
+function parsedDoc(doc: CMText, token: string) {
   let c = docCache.get(doc);
   if (!c) {
     const lines = doc.toString().split("\n");
@@ -244,11 +240,11 @@ export function stripMarkersFromRendered(el: HTMLElement, token: string): void {
     }
     // Mixed paragraph (marker on its own line via soft break): remove marker text nodes.
     if (lines.some((l) => re.test(l))) {
-      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-      const toClean: Text2[] = [];
+      const walker = (el.ownerDocument ?? activeDocument).createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const toClean: Text[] = [];
       let t: Node | null;
       while ((t = walker.nextNode())) {
-        if (re.test((t.textContent ?? "").trim())) toClean.push(t as Text2);
+        if (re.test((t.textContent ?? "").trim()) && t.instanceOf(Text)) toClean.push(t);
       }
       toClean.forEach((textNode) => {
         const prev = textNode.previousSibling;
@@ -260,6 +256,3 @@ export function stripMarkersFromRendered(el: HTMLElement, token: string): void {
     }
   });
 }
-
-// DOM Text node (the CM6 import shadows the global Text type).
-type Text2 = globalThis.Text;

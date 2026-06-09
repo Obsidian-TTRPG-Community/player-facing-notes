@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, PfnSettings, PfnSettingTab } from "./settings";
 import { PlayerSync } from "./sync";
 
 export default class PlayerFacingNotesPlugin extends Plugin {
-  settings: PfnSettings = Object.assign({}, DEFAULT_SETTINGS);
+  settings: PfnSettings = { ...DEFAULT_SETTINGS };
   sync!: PlayerSync;
 
   async onload() {

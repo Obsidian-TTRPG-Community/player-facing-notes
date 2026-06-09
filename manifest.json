@@ -1,9 +1,9 @@
 {
   "id": "player-facing-notes",
   "name": "Player Facing Notes",
-  "version": "0.4.0",
-  "minAppVersion": "1.5.0",
-  "description": "Flag blocks of content as player-facing and publish only those blocks via Obsidian Publish, using a generated player-safe mirror folder.",
-  "author": "Josh",
+  "version": "1.0.0",
+  "minAppVersion": "1.6.6",
+  "description": "Selectively publish parts of your notes. Flag blocks as public, then sync them into publish-ready copies, keeping secrets, drafts, and private content out of your published site.",
+  "author": "Josh Plunkett",
   "isDesktopOnly": false
 }

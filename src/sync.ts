@@ -177,7 +177,7 @@ export class PlayerSync {
 
     if (body === null) {
       // No player content: remove the plugin-owned copy if present.
-      if (existing) await this.app.vault.delete(existing);
+      if (existing) await this.app.fileManager.trashFile(existing);
       return false;
     }
 
@@ -229,7 +229,7 @@ export class PlayerSync {
     // Only files WITH pfn-source are plugin-owned; everything else is left alone.
     for (const [src, copy] of copies) {
       if (!playerSet.has(src)) {
-        await this.app.vault.delete(copy).catch(() => {});
+        await this.app.fileManager.trashFile(copy).catch(() => {});
         this.forget(copy.path);
       }
     }

@@ -22,10 +22,11 @@ __export(main_exports, {
   default: () => PlayerFacingNotesPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/editor.ts
 var import_view = require("@codemirror/view");
+var import_obsidian = require("obsidian");
 
 // src/parser.ts
 var escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -228,7 +229,7 @@ var MarkerPill = class extends import_view.WidgetType {
     return other.kind === this.kind;
   }
   toDOM() {
-    const el = document.createElement("span");
+    const el = activeDocument.createElement("span");
     el.className = `pfn-pill pfn-pill-${this.kind}`;
     el.textContent = this.kind === "start" ? "\u25BE player-facing" : "\u25B4";
     el.setAttribute("aria-label", this.kind === "start" ? "Start of player-facing content" : "End of player-facing content");
@@ -291,8 +292,6 @@ function pfnEditorExtension(getToken) {
     { decorations: (v) => v.decorations }
   );
 }
-var EYE_OPEN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
-var EYE_CLOSED = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
 var EyeMarker = class extends import_view.GutterMarker {
   constructor(on) {
     super();
@@ -302,9 +301,9 @@ var EyeMarker = class extends import_view.GutterMarker {
     return other.on === this.on;
   }
   toDOM() {
-    const el = document.createElement("span");
+    const el = activeDocument.createElement("span");
     el.className = this.on ? "pfn-eye pfn-eye-on" : "pfn-eye pfn-eye-off";
-    el.innerHTML = this.on ? EYE_OPEN : EYE_CLOSED;
+    (0, import_obsidian.setIcon)(el, this.on ? "eye" : "eye-off");
     el.setAttribute(
       "aria-label",
       this.on ? "Player-facing \u2014 click to hide from players" : "DM-only \u2014 click to show players"
@@ -408,11 +407,11 @@ function stripMarkersFromRendered(el, token) {
       return;
     }
     if (lines.some((l) => re.test(l))) {
-      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const walker = (el.ownerDocument ?? activeDocument).createTreeWalker(node, NodeFilter.SHOW_TEXT);
       const toClean = [];
       let t;
       while (t = walker.nextNode()) {
-        if (re.test((t.textContent ?? "").trim()))
+        if (re.test((t.textContent ?? "").trim()) && t.instanceOf(Text))
           toClean.push(t);
       }
       toClean.forEach((textNode) => {
@@ -429,14 +428,14 @@ function stripMarkersFromRendered(el, token) {
 }
 
 // src/settings.ts
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 var DEFAULT_SETTINGS = {
   token: "pf",
   outputFolder: "_player",
   autoSync: false,
   contextMenu: true
 };
-var PfnSettingTab = class extends import_obsidian.PluginSettingTab {
+var PfnSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -444,25 +443,25 @@ var PfnSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Marker token").setDesc("Markers become ::token and ::/token. Changing this does not update existing notes.").addText(
+    new import_obsidian2.Setting(containerEl).setName("Marker token").setDesc("Markers become ::token and ::/token. Changing this does not update existing notes.").addText(
       (t) => t.setValue(this.plugin.settings.token).onChange(async (v) => {
         this.plugin.settings.token = v.trim() || "pf";
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Output folder").setDesc("Player copies mirror your vault structure inside this folder. Publish only this folder.").addText(
+    new import_obsidian2.Setting(containerEl).setName("Output folder").setDesc("Player copies mirror your vault structure inside this folder. Publish only this folder.").addText(
       (t) => t.setValue(this.plugin.settings.outputFolder).onChange(async (v) => {
         this.plugin.settings.outputFolder = (v.trim() || "_player").replace(/\/+$/, "");
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Right-click menu").setDesc("Show 'Show to players' / 'Hide from players' in the editor context menu.").addToggle(
+    new import_obsidian2.Setting(containerEl).setName("Right-click menu").setDesc("Add player visibility actions to the editor context menu.").addToggle(
       (t) => t.setValue(this.plugin.settings.contextMenu).onChange(async (v) => {
         this.plugin.settings.contextMenu = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Auto-sync on save").setDesc("Regenerate a note's player copy whenever the note changes.").addToggle(
+    new import_obsidian2.Setting(containerEl).setName("Auto-sync on save").setDesc("Regenerate a note's player copy whenever the note changes.").addToggle(
       (t) => t.setValue(this.plugin.settings.autoSync).onChange(async (v) => {
         this.plugin.settings.autoSync = v;
         await this.plugin.saveSettings();
@@ -472,10 +471,10 @@ var PfnSettingTab = class extends import_obsidian.PluginSettingTab {
 };
 
 // src/sync.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 var isMarkdown = (f) => f.extension === "md";
 function defaultPlayerPath(file, settings) {
-  return (0, import_obsidian2.normalizePath)(`${settings.outputFolder}/${file.path}`);
+  return (0, import_obsidian3.normalizePath)(`${settings.outputFolder}/${file.path}`);
 }
 var linkTarget = (path) => path.replace(/\.md$/, "");
 var PlayerSync = class {
@@ -488,7 +487,7 @@ var PlayerSync = class {
     this.sourceCache = /* @__PURE__ */ new Map();
   }
   outPrefix() {
-    return (0, import_obsidian2.normalizePath)(this.settings.outputFolder) + "/";
+    return (0, import_obsidian3.normalizePath)(this.settings.outputFolder) + "/";
   }
   sourceFiles() {
     const out = this.outPrefix();
@@ -613,7 +612,7 @@ var PlayerSync = class {
     const existing = copies.get(file.path) ?? null;
     if (body === null) {
       if (existing)
-        await this.app.vault.delete(existing);
+        await this.app.fileManager.trashFile(existing);
       return false;
     }
     if (existing) {
@@ -626,7 +625,7 @@ var PlayerSync = class {
     const outPath = defaultPlayerPath(file, this.settings);
     const atPath = this.app.vault.getAbstractFileByPath(outPath);
     const content = this.composeCopy(file.path, body, null);
-    if (atPath instanceof import_obsidian2.TFile) {
+    if (atPath instanceof import_obsidian3.TFile) {
       await this.app.vault.modify(atPath, content);
     } else {
       await this.ensureFolder(outPath);
@@ -640,7 +639,7 @@ var PlayerSync = class {
     const playerSet = await this.collectPlayerSet(this.sourceFiles(), copies);
     const wrote = await this.writeCopy(file, playerSet, copies);
     const copy = copies.get(file.path);
-    new import_obsidian2.Notice(
+    new import_obsidian3.Notice(
       wrote ? `Player copy updated: ${copy ? copy.path : defaultPlayerPath(file, this.settings)}` : "No player-facing content in this note."
     );
   }
@@ -656,12 +655,12 @@ var PlayerSync = class {
     }
     for (const [src, copy] of copies) {
       if (!playerSet.has(src)) {
-        await this.app.vault.delete(copy).catch(() => {
+        await this.app.fileManager.trashFile(copy).catch(() => {
         });
         this.forget(copy.path);
       }
     }
-    new import_obsidian2.Notice(`Player sync complete: ${written} note(s) in ${this.settings.outputFolder}/`);
+    new import_obsidian3.Notice(`Player sync complete: ${written} note(s) in ${this.settings.outputFolder}/`);
   }
   /** Keep a copy's pfn-source pointing at its source when the source moves. */
   async handleSourceRename(newFile, oldPath) {
@@ -681,10 +680,10 @@ var PlayerSync = class {
 };
 
 // src/main.ts
-var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
+var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
-    this.settings = Object.assign({}, DEFAULT_SETTINGS);
+    this.settings = { ...DEFAULT_SETTINGS };
   }
   async onload() {
     await this.loadSettings();
@@ -755,21 +754,21 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
       "Sync player-facing notes",
       () => void this.sync.syncVault()
     );
-    const autoSync = (0, import_obsidian3.debounce)(
+    const autoSync = (0, import_obsidian4.debounce)(
       (file) => void this.sync.syncFile(file),
       2e3,
       true
     );
     this.registerEvent(
       this.app.vault.on("rename", (f, oldPath) => {
-        if (f instanceof import_obsidian3.TFile && f.extension === "md" && !f.path.startsWith(this.settings.outputFolder + "/") && !oldPath.startsWith(this.settings.outputFolder + "/")) {
+        if (f instanceof import_obsidian4.TFile && f.extension === "md" && !f.path.startsWith(this.settings.outputFolder + "/") && !oldPath.startsWith(this.settings.outputFolder + "/")) {
           void this.sync.handleSourceRename(f, oldPath);
         }
       })
     );
     this.registerEvent(
       this.app.vault.on("modify", (f) => {
-        if (this.settings.autoSync && f instanceof import_obsidian3.TFile && f.extension === "md" && !f.path.startsWith(this.settings.outputFolder + "/")) {
+        if (this.settings.autoSync && f instanceof import_obsidian4.TFile && f.extension === "md" && !f.path.startsWith(this.settings.outputFolder + "/")) {
           autoSync(f);
         }
       })

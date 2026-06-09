@@ -1,6 +1,8 @@
 # Player Facing Notes
 
-An Obsidian plugin for Dungeon Masters. Flag blocks of any note as **player-facing**, then publish *only those blocks* to your players via Obsidian Publish. DM-only text never leaves your vault.
+**Selectively publish parts of your notes.** Flag blocks of any note as player-facing (public), then sync them into publish-ready copies for Obsidian Publish — the rest of the note never leaves your vault.
+
+Built for Dungeon Masters who keep campaign notes and player handouts in one place, but just as useful for anyone publishing from a working vault: public docs with private margin notes, blog drafts with internal comments, shared team notes with personal context.
 
 ## How it works
 

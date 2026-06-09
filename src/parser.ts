@@ -105,24 +105,18 @@ export interface PlayerCopyResult {
 }
 
 /**
- * Build the player-safe version of a note: only content inside ::pf regions,
- * marker lines stripped, links rewritten, fresh frontmatter.
+ * Extract just the player-safe body (no frontmatter): content inside ::pf
+ * regions, marker lines stripped, links rewritten. Null if no regions.
  */
-export function buildPlayerCopy(
+export function buildPlayerBody(
   source: string,
-  opts: ParserOptions,
-  extraFrontmatter: Record<string, string> = {}
-): PlayerCopyResult {
+  opts: ParserOptions
+): string | null {
   const lines = source.split("\n");
   const regions = findRegions(lines, opts.token);
-  if (regions.length === 0) return { content: null, regionCount: 0 };
+  if (regions.length === 0) return null;
 
-  const out: string[] = [];
-  out.push("---");
-  out.push("publish: true");
-  for (const [k, v] of Object.entries(extraFrontmatter)) out.push(`${k}: ${v}`);
-  out.push("---");
-
+  const chunks: string[] = [];
   for (const r of regions) {
     const from = r.startLine + 1;
     const to = r.unclosed ? r.endLine + 1 : r.endLine;
@@ -132,12 +126,39 @@ export function buildPlayerCopy(
     while (chunk.length && chunk[chunk.length - 1].trim() === "") chunk.pop();
     if (chunk.length === 0) continue;
     if (opts.resolveLink) chunk = chunk.map((l) => rewriteLinks(l, opts.resolveLink!));
-    out.push("");
-    out.push(...chunk);
+    chunks.push(chunk.join("\n"));
   }
+  return chunks.join("\n\n");
+}
 
-  out.push("");
-  return { content: out.join("\n"), regionCount: regions.length };
+/**
+ * Build the player-safe version of a note: only content inside ::pf regions,
+ * marker lines stripped, links rewritten, fresh frontmatter.
+ */
+export function buildPlayerCopy(
+  source: string,
+  opts: ParserOptions,
+  extraFrontmatter: Record<string, string> = {}
+): PlayerCopyResult {
+  const body = buildPlayerBody(source, opts);
+  if (body === null) return { content: null, regionCount: 0 };
+  const regionCount = findRegions(source.split("\n"), opts.token).length;
+  const fm = ["---", "publish: true"];
+  for (const [k, v] of Object.entries(extraFrontmatter)) fm.push(`${k}: ${v}`);
+  fm.push("---");
+  return { content: fm.join("\n") + "\n\n" + body + "\n", regionCount };
+}
+
+/** Read the pfn-source property from a player copy's raw content. */
+export function readPfnSource(content: string): string | null {
+  const lines = content.split("\n");
+  const fm = frontmatterRange(lines);
+  if (!fm) return null;
+  for (let i = 1; i < fm[1] - 1; i++) {
+    const m = lines[i].match(/^pfn-source:\s*["']?(.*?)["']?\s*$/);
+    if (m && m[1]) return m[1];
+  }
+  return null;
 }
 
 /**

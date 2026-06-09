@@ -26,6 +26,15 @@ An Obsidian plugin for Dungeon Masters. Flag blocks of any note as **player-faci
 
 4. **Publish.** In Obsidian Publish, publish only the `_player/` folder. Your master notes keep `publish: false` (or simply never get selected). Because filtering happens *before* upload, players cannot recover DM text from page source — unlike CSS/publish.js hiding, which only hides content client-side.
 
+## Rearranging the player folder
+
+Player copies are tracked by the `pfn-source` property in their frontmatter, **not by their path**. Move or rename copies anywhere inside the player folder — build whatever structure your players should see — and future syncs update them in place. New copies start at the mirrored location; after that, layout is yours.
+
+- Frontmatter you add to a copy (aliases, cssclasses, banners, ...) survives syncs; only `publish` and `pfn-source` are managed.
+- Notes you create inside the player folder *without* `pfn-source` are never touched or pruned — handy for player-only index pages.
+- Moving or renaming a *source* note updates its copy's `pfn-source` automatically, so your layout survives vault reorganizations.
+- Wikilinks in copies always point at the copy's current location.
+
 ## Link handling
 
 Inside player copies, wikilinks are rewritten:

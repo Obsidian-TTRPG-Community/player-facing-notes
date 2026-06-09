@@ -1,10 +1,11 @@
 import { App, Notice, TFile, normalizePath } from "obsidian";
-import { buildPlayerCopy, findRegions } from "./parser";
+import { buildPlayerBody, findRegions, frontmatterRange, readPfnSource } from "./parser";
 import type { PfnSettings } from "./settings";
 
 const isMarkdown = (f: TFile) => f.extension === "md";
 
-function playerPathFor(file: TFile, settings: PfnSettings): string {
+/** Default location for a brand-new copy: mirrors the vault structure. */
+function defaultPlayerPath(file: TFile, settings: PfnSettings): string {
   return normalizePath(`${settings.outputFolder}/${file.path}`);
 }
 
@@ -14,20 +15,49 @@ const linkTarget = (path: string) => path.replace(/\.md$/, "");
 export class PlayerSync {
   constructor(private app: App, private settings: PfnSettings) {}
 
-  private sourceFiles(): TFile[] {
-    const out = normalizePath(this.settings.outputFolder) + "/";
-    return this.app.vault
-      .getMarkdownFiles()
-      .filter((f) => !f.path.startsWith(out));
+  private outPrefix(): string {
+    return normalizePath(this.settings.outputFolder) + "/";
   }
 
-  /** Set of source paths that contain at least one player-facing region. */
-  private async collectPlayerSet(files: TFile[]): Promise<Map<string, string>> {
-    const set = new Map<string, string>(); // source path -> player link target
+  private sourceFiles(): TFile[] {
+    const out = this.outPrefix();
+    return this.app.vault.getMarkdownFiles().filter((f) => !f.path.startsWith(out));
+  }
+
+  private outputFiles(): TFile[] {
+    const out = this.outPrefix();
+    return this.app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(out));
+  }
+
+  /**
+   * Index existing player copies by their pfn-source property. The user may
+   * move/rename copies anywhere inside the output folder — we follow the
+   * property, not the path. Output notes WITHOUT pfn-source are user-owned
+   * and never touched.
+   */
+  private async copyIndex(): Promise<Map<string, TFile>> {
+    const idx = new Map<string, TFile>();
+    for (const f of this.outputFiles()) {
+      const src = readPfnSource(await this.app.vault.cachedRead(f));
+      if (src && !idx.has(src)) idx.set(src, f);
+    }
+    return idx;
+  }
+
+  /** Source paths with player content -> wikilink target of their copy. */
+  private async collectPlayerSet(
+    files: TFile[],
+    copies: Map<string, TFile>
+  ): Promise<Map<string, string>> {
+    const set = new Map<string, string>();
     for (const f of files) {
       const text = await this.app.vault.cachedRead(f);
       if (findRegions(text.split("\n"), this.settings.token).length > 0) {
-        set.set(f.path, linkTarget(playerPathFor(f, this.settings)));
+        const existing = copies.get(f.path);
+        set.set(
+          f.path,
+          linkTarget(existing ? existing.path : defaultPlayerPath(f, this.settings))
+        );
       }
     }
     return set;
@@ -40,80 +70,122 @@ export class PlayerSync {
     }
   }
 
+  /**
+   * Compose the full copy content. For an existing copy, every frontmatter
+   * key the user added (aliases, cssclasses, banners, ...) is preserved;
+   * only publish and pfn-source are normalized.
+   */
+  private composeCopy(sourcePath: string, body: string, existingContent: string | null): string {
+    const userFm: string[] = [];
+    if (existingContent) {
+      const lines = existingContent.split("\n");
+      const fm = frontmatterRange(lines);
+      if (fm) {
+        for (const l of lines.slice(1, fm[1] - 1)) {
+          if (!/^(publish|pfn-source)\s*:/.test(l)) userFm.push(l);
+        }
+      }
+    }
+    return [
+      "---",
+      "publish: true",
+      `pfn-source: "${sourcePath}"`,
+      ...userFm,
+      "---",
+      "",
+      body,
+      "",
+    ].join("\n");
+  }
+
   private async writeCopy(
     file: TFile,
-    playerSet: Map<string, string>
+    playerSet: Map<string, string>,
+    copies: Map<string, TFile>
   ): Promise<boolean> {
     const text = await this.app.vault.cachedRead(file);
-    const result = buildPlayerCopy(
-      text,
-      {
-        token: this.settings.token,
-        resolveLink: (linkpath) => {
-          const dest = this.app.metadataCache.getFirstLinkpathDest(
-            linkpath,
-            file.path
-          );
-          if (!dest) return undefined; // unresolved — leave alone
-          if (!isMarkdown(dest)) return undefined; // attachment — leave alone
-          return playerSet.get(dest.path) ?? null; // null = DM-only, flatten
-        },
+    const body = buildPlayerBody(text, {
+      token: this.settings.token,
+      resolveLink: (linkpath) => {
+        const dest = this.app.metadataCache.getFirstLinkpathDest(linkpath, file.path);
+        if (!dest) return undefined; // unresolved — leave alone
+        if (!isMarkdown(dest)) return undefined; // attachment — leave alone
+        return playerSet.get(dest.path) ?? null; // null = DM-only, flatten
       },
-      { "pfn-source": `"${file.path}"` }
-    );
+    });
 
-    const outPath = playerPathFor(file, this.settings);
-    const existing = this.app.vault.getAbstractFileByPath(outPath);
+    const existing = copies.get(file.path) ?? null;
 
-    if (result.content === null) {
-      // No player content: remove stale copy if present.
-      if (existing instanceof TFile) await this.app.vault.delete(existing);
+    if (body === null) {
+      // No player content: remove the plugin-owned copy if present.
+      if (existing) await this.app.vault.delete(existing);
       return false;
     }
 
-    if (existing instanceof TFile) {
+    if (existing) {
+      // Update in place — wherever the user moved/renamed it.
       const current = await this.app.vault.cachedRead(existing);
-      if (current !== result.content)
-        await this.app.vault.modify(existing, result.content);
+      const content = this.composeCopy(file.path, body, current);
+      if (current !== content) await this.app.vault.modify(existing, content);
+      return true;
+    }
+
+    // New copy at the default mirrored location.
+    const outPath = defaultPlayerPath(file, this.settings);
+    const atPath = this.app.vault.getAbstractFileByPath(outPath);
+    const content = this.composeCopy(file.path, body, null);
+    if (atPath instanceof TFile) {
+      await this.app.vault.modify(atPath, content);
     } else {
       await this.ensureFolder(outPath);
-      await this.app.vault.create(outPath, result.content);
+      await this.app.vault.create(outPath, content);
     }
     return true;
   }
 
   /** Sync a single file. */
   async syncFile(file: TFile): Promise<void> {
-    const files = this.sourceFiles();
-    const playerSet = await this.collectPlayerSet(files);
-    const wrote = await this.writeCopy(file, playerSet);
+    const copies = await this.copyIndex();
+    const playerSet = await this.collectPlayerSet(this.sourceFiles(), copies);
+    const wrote = await this.writeCopy(file, playerSet, copies);
+    const copy = copies.get(file.path);
     new Notice(
       wrote
-        ? `Player copy updated: ${playerPathFor(file, this.settings)}`
+        ? `Player copy updated: ${copy ? copy.path : defaultPlayerPath(file, this.settings)}`
         : "No player-facing content in this note."
     );
   }
 
-  /** Sync the whole vault; prunes stale copies. */
+  /** Sync the whole vault; prunes stale plugin-owned copies. */
   async syncVault(): Promise<void> {
+    const copies = await this.copyIndex();
     const files = this.sourceFiles();
-    const playerSet = await this.collectPlayerSet(files);
+    const playerSet = await this.collectPlayerSet(files, copies);
     let written = 0;
     for (const f of files) {
-      if (await this.writeCopy(f, playerSet)) written++;
+      if (await this.writeCopy(f, playerSet, copies)) written++;
     }
-    // Prune player copies whose source no longer exists / has no regions.
-    const out = normalizePath(this.settings.outputFolder) + "/";
-    const validOutputs = new Set(
-      [...playerSet.keys()].map((p) =>
-        normalizePath(`${this.settings.outputFolder}/${p}`)
-      )
-    );
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      if (f.path.startsWith(out) && !validOutputs.has(f.path)) {
-        await this.app.vault.delete(f);
+    // Prune copies whose source was deleted or no longer has regions.
+    // Only files WITH pfn-source are plugin-owned; everything else is left alone.
+    for (const [src, copy] of copies) {
+      if (!playerSet.has(src)) {
+        await this.app.vault.delete(copy).catch(() => {});
       }
     }
     new Notice(`Player sync complete: ${written} note(s) in ${this.settings.outputFolder}/`);
+  }
+
+  /** Keep a copy's pfn-source pointing at its source when the source moves. */
+  async handleSourceRename(newFile: TFile, oldPath: string): Promise<void> {
+    for (const copy of this.outputFiles()) {
+      const content = await this.app.vault.cachedRead(copy);
+      if (readPfnSource(content) === oldPath) {
+        await this.app.vault.modify(
+          copy,
+          content.replace(/^pfn-source\s*:.*$/m, `pfn-source: "${newFile.path}"`)
+        );
+        return;
+      }
+    }
   }
 }

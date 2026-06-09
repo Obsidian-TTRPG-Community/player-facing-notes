@@ -100,6 +100,21 @@ export default class PlayerFacingNotesPlugin extends Plugin {
       2000,
       true
     );
+    // Keep copies attached when a source note is moved/renamed, so the
+    // user's custom layout inside the player folder survives.
+    this.registerEvent(
+      this.app.vault.on("rename", (f, oldPath) => {
+        if (
+          f instanceof TFile &&
+          f.extension === "md" &&
+          !f.path.startsWith(this.settings.outputFolder + "/") &&
+          !oldPath.startsWith(this.settings.outputFolder + "/")
+        ) {
+          void new PlayerSync(this.app, this.settings).handleSourceRename(f, oldPath);
+        }
+      })
+    );
+
     this.registerEvent(
       this.app.vault.on("modify", (f) => {
         if (

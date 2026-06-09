@@ -85,17 +85,12 @@ function rewriteLinks(line, resolveLink) {
     }
   );
 }
-function buildPlayerCopy(source, opts, extraFrontmatter = {}) {
+function buildPlayerBody(source, opts) {
   const lines = source.split("\n");
   const regions = findRegions(lines, opts.token);
   if (regions.length === 0)
-    return { content: null, regionCount: 0 };
-  const out = [];
-  out.push("---");
-  out.push("publish: true");
-  for (const [k, v] of Object.entries(extraFrontmatter))
-    out.push(`${k}: ${v}`);
-  out.push("---");
+    return null;
+  const chunks = [];
   for (const r of regions) {
     const from = r.startLine + 1;
     const to = r.unclosed ? r.endLine + 1 : r.endLine;
@@ -108,11 +103,21 @@ function buildPlayerCopy(source, opts, extraFrontmatter = {}) {
       continue;
     if (opts.resolveLink)
       chunk = chunk.map((l) => rewriteLinks(l, opts.resolveLink));
-    out.push("");
-    out.push(...chunk);
+    chunks.push(chunk.join("\n"));
   }
-  out.push("");
-  return { content: out.join("\n"), regionCount: regions.length };
+  return chunks.join("\n\n");
+}
+function readPfnSource(content) {
+  const lines = content.split("\n");
+  const fm = frontmatterRange(lines);
+  if (!fm)
+    return null;
+  for (let i = 1; i < fm[1] - 1; i++) {
+    const m = lines[i].match(/^pfn-source:\s*["']?(.*?)["']?\s*$/);
+    if (m && m[1])
+      return m[1];
+  }
+  return null;
 }
 var isBlockquote = (l) => /^\s{0,3}>/.test(l);
 var isFenceDelim = (l) => /^\s{0,3}(```|~~~)/.test(l);
@@ -462,7 +467,7 @@ var PfnSettingTab = class extends import_obsidian.PluginSettingTab {
 // src/sync.ts
 var import_obsidian2 = require("obsidian");
 var isMarkdown = (f) => f.extension === "md";
-function playerPathFor(file, settings) {
+function defaultPlayerPath(file, settings) {
   return (0, import_obsidian2.normalizePath)(`${settings.outputFolder}/${file.path}`);
 }
 var linkTarget = (path) => path.replace(/\.md$/, "");
@@ -471,17 +476,43 @@ var PlayerSync = class {
     this.app = app;
     this.settings = settings;
   }
+  outPrefix() {
+    return (0, import_obsidian2.normalizePath)(this.settings.outputFolder) + "/";
+  }
   sourceFiles() {
-    const out = (0, import_obsidian2.normalizePath)(this.settings.outputFolder) + "/";
+    const out = this.outPrefix();
     return this.app.vault.getMarkdownFiles().filter((f) => !f.path.startsWith(out));
   }
-  /** Set of source paths that contain at least one player-facing region. */
-  async collectPlayerSet(files) {
+  outputFiles() {
+    const out = this.outPrefix();
+    return this.app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(out));
+  }
+  /**
+   * Index existing player copies by their pfn-source property. The user may
+   * move/rename copies anywhere inside the output folder — we follow the
+   * property, not the path. Output notes WITHOUT pfn-source are user-owned
+   * and never touched.
+   */
+  async copyIndex() {
+    const idx = /* @__PURE__ */ new Map();
+    for (const f of this.outputFiles()) {
+      const src = readPfnSource(await this.app.vault.cachedRead(f));
+      if (src && !idx.has(src))
+        idx.set(src, f);
+    }
+    return idx;
+  }
+  /** Source paths with player content -> wikilink target of their copy. */
+  async collectPlayerSet(files, copies) {
     const set = /* @__PURE__ */ new Map();
     for (const f of files) {
       const text = await this.app.vault.cachedRead(f);
       if (findRegions(text.split("\n"), this.settings.token).length > 0) {
-        set.set(f.path, linkTarget(playerPathFor(f, this.settings)));
+        const existing = copies.get(f.path);
+        set.set(
+          f.path,
+          linkTarget(existing ? existing.path : defaultPlayerPath(f, this.settings))
+        );
       }
     }
     return set;
@@ -493,73 +524,111 @@ var PlayerSync = class {
       });
     }
   }
-  async writeCopy(file, playerSet) {
-    const text = await this.app.vault.cachedRead(file);
-    const result = buildPlayerCopy(
-      text,
-      {
-        token: this.settings.token,
-        resolveLink: (linkpath) => {
-          const dest = this.app.metadataCache.getFirstLinkpathDest(
-            linkpath,
-            file.path
-          );
-          if (!dest)
-            return void 0;
-          if (!isMarkdown(dest))
-            return void 0;
-          return playerSet.get(dest.path) ?? null;
+  /**
+   * Compose the full copy content. For an existing copy, every frontmatter
+   * key the user added (aliases, cssclasses, banners, ...) is preserved;
+   * only publish and pfn-source are normalized.
+   */
+  composeCopy(sourcePath, body, existingContent) {
+    const userFm = [];
+    if (existingContent) {
+      const lines = existingContent.split("\n");
+      const fm = frontmatterRange(lines);
+      if (fm) {
+        for (const l of lines.slice(1, fm[1] - 1)) {
+          if (!/^(publish|pfn-source)\s*:/.test(l))
+            userFm.push(l);
         }
-      },
-      { "pfn-source": `"${file.path}"` }
-    );
-    const outPath = playerPathFor(file, this.settings);
-    const existing = this.app.vault.getAbstractFileByPath(outPath);
-    if (result.content === null) {
-      if (existing instanceof import_obsidian2.TFile)
+      }
+    }
+    return [
+      "---",
+      "publish: true",
+      `pfn-source: "${sourcePath}"`,
+      ...userFm,
+      "---",
+      "",
+      body,
+      ""
+    ].join("\n");
+  }
+  async writeCopy(file, playerSet, copies) {
+    const text = await this.app.vault.cachedRead(file);
+    const body = buildPlayerBody(text, {
+      token: this.settings.token,
+      resolveLink: (linkpath) => {
+        const dest = this.app.metadataCache.getFirstLinkpathDest(linkpath, file.path);
+        if (!dest)
+          return void 0;
+        if (!isMarkdown(dest))
+          return void 0;
+        return playerSet.get(dest.path) ?? null;
+      }
+    });
+    const existing = copies.get(file.path) ?? null;
+    if (body === null) {
+      if (existing)
         await this.app.vault.delete(existing);
       return false;
     }
-    if (existing instanceof import_obsidian2.TFile) {
+    if (existing) {
       const current = await this.app.vault.cachedRead(existing);
-      if (current !== result.content)
-        await this.app.vault.modify(existing, result.content);
+      const content2 = this.composeCopy(file.path, body, current);
+      if (current !== content2)
+        await this.app.vault.modify(existing, content2);
+      return true;
+    }
+    const outPath = defaultPlayerPath(file, this.settings);
+    const atPath = this.app.vault.getAbstractFileByPath(outPath);
+    const content = this.composeCopy(file.path, body, null);
+    if (atPath instanceof import_obsidian2.TFile) {
+      await this.app.vault.modify(atPath, content);
     } else {
       await this.ensureFolder(outPath);
-      await this.app.vault.create(outPath, result.content);
+      await this.app.vault.create(outPath, content);
     }
     return true;
   }
   /** Sync a single file. */
   async syncFile(file) {
-    const files = this.sourceFiles();
-    const playerSet = await this.collectPlayerSet(files);
-    const wrote = await this.writeCopy(file, playerSet);
+    const copies = await this.copyIndex();
+    const playerSet = await this.collectPlayerSet(this.sourceFiles(), copies);
+    const wrote = await this.writeCopy(file, playerSet, copies);
+    const copy = copies.get(file.path);
     new import_obsidian2.Notice(
-      wrote ? `Player copy updated: ${playerPathFor(file, this.settings)}` : "No player-facing content in this note."
+      wrote ? `Player copy updated: ${copy ? copy.path : defaultPlayerPath(file, this.settings)}` : "No player-facing content in this note."
     );
   }
-  /** Sync the whole vault; prunes stale copies. */
+  /** Sync the whole vault; prunes stale plugin-owned copies. */
   async syncVault() {
+    const copies = await this.copyIndex();
     const files = this.sourceFiles();
-    const playerSet = await this.collectPlayerSet(files);
+    const playerSet = await this.collectPlayerSet(files, copies);
     let written = 0;
     for (const f of files) {
-      if (await this.writeCopy(f, playerSet))
+      if (await this.writeCopy(f, playerSet, copies))
         written++;
     }
-    const out = (0, import_obsidian2.normalizePath)(this.settings.outputFolder) + "/";
-    const validOutputs = new Set(
-      [...playerSet.keys()].map(
-        (p) => (0, import_obsidian2.normalizePath)(`${this.settings.outputFolder}/${p}`)
-      )
-    );
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      if (f.path.startsWith(out) && !validOutputs.has(f.path)) {
-        await this.app.vault.delete(f);
+    for (const [src, copy] of copies) {
+      if (!playerSet.has(src)) {
+        await this.app.vault.delete(copy).catch(() => {
+        });
       }
     }
     new import_obsidian2.Notice(`Player sync complete: ${written} note(s) in ${this.settings.outputFolder}/`);
+  }
+  /** Keep a copy's pfn-source pointing at its source when the source moves. */
+  async handleSourceRename(newFile, oldPath) {
+    for (const copy of this.outputFiles()) {
+      const content = await this.app.vault.cachedRead(copy);
+      if (readPfnSource(content) === oldPath) {
+        await this.app.vault.modify(
+          copy,
+          content.replace(/^pfn-source\s*:.*$/m, `pfn-source: "${newFile.path}"`)
+        );
+        return;
+      }
+    }
   }
 };
 
@@ -639,6 +708,13 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
       (file) => void new PlayerSync(this.app, this.settings).syncFile(file),
       2e3,
       true
+    );
+    this.registerEvent(
+      this.app.vault.on("rename", (f, oldPath) => {
+        if (f instanceof import_obsidian3.TFile && f.extension === "md" && !f.path.startsWith(this.settings.outputFolder + "/") && !oldPath.startsWith(this.settings.outputFolder + "/")) {
+          void new PlayerSync(this.app, this.settings).handleSourceRename(f, oldPath);
+        }
+      })
     );
     this.registerEvent(
       this.app.vault.on("modify", (f) => {

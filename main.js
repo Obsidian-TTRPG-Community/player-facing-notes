@@ -482,6 +482,10 @@ var PlayerSync = class {
   constructor(app, settings) {
     this.app = app;
     this.settings = settings;
+    /** source path -> has at least one ::pf region */
+    this.regionCache = /* @__PURE__ */ new Map();
+    /** copy path -> its pfn-source property */
+    this.sourceCache = /* @__PURE__ */ new Map();
   }
   outPrefix() {
     return (0, import_obsidian2.normalizePath)(this.settings.outputFolder) + "/";
@@ -494,6 +498,41 @@ var PlayerSync = class {
     const out = this.outPrefix();
     return this.app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(out));
   }
+  cached(cache, f) {
+    const c = cache.get(f.path);
+    return c && c.mtime === f.stat.mtime && c.size === f.stat.size && c.token === this.settings.token ? c.value : void 0;
+  }
+  store(cache, f, value) {
+    cache.set(f.path, {
+      mtime: f.stat.mtime,
+      size: f.stat.size,
+      token: this.settings.token,
+      value
+    });
+    return value;
+  }
+  async hasRegions(f) {
+    const hit = this.cached(this.regionCache, f);
+    if (hit !== void 0)
+      return hit;
+    const text = await this.app.vault.cachedRead(f);
+    return this.store(
+      this.regionCache,
+      f,
+      findRegions(text.split("\n"), this.settings.token).length > 0
+    );
+  }
+  async pfnSourceOf(f) {
+    const hit = this.cached(this.sourceCache, f);
+    if (hit !== void 0)
+      return hit;
+    return this.store(this.sourceCache, f, readPfnSource(await this.app.vault.cachedRead(f)));
+  }
+  /** Drop cache entries for a path (rename/delete housekeeping). */
+  forget(path) {
+    this.regionCache.delete(path);
+    this.sourceCache.delete(path);
+  }
   /**
    * Index existing player copies by their pfn-source property. The user may
    * move/rename copies anywhere inside the output folder — we follow the
@@ -503,7 +542,7 @@ var PlayerSync = class {
   async copyIndex() {
     const idx = /* @__PURE__ */ new Map();
     for (const f of this.outputFiles()) {
-      const src = readPfnSource(await this.app.vault.cachedRead(f));
+      const src = await this.pfnSourceOf(f);
       if (src && !idx.has(src))
         idx.set(src, f);
     }
@@ -513,8 +552,7 @@ var PlayerSync = class {
   async collectPlayerSet(files, copies) {
     const set = /* @__PURE__ */ new Map();
     for (const f of files) {
-      const text = await this.app.vault.cachedRead(f);
-      if (findRegions(text.split("\n"), this.settings.token).length > 0) {
+      if (await this.hasRegions(f)) {
         const existing = copies.get(f.path);
         set.set(
           f.path,
@@ -613,19 +651,21 @@ var PlayerSync = class {
     const playerSet = await this.collectPlayerSet(files, copies);
     let written = 0;
     for (const f of files) {
-      if (await this.writeCopy(f, playerSet, copies))
+      if (playerSet.has(f.path) && await this.writeCopy(f, playerSet, copies))
         written++;
     }
     for (const [src, copy] of copies) {
       if (!playerSet.has(src)) {
         await this.app.vault.delete(copy).catch(() => {
         });
+        this.forget(copy.path);
       }
     }
     new import_obsidian2.Notice(`Player sync complete: ${written} note(s) in ${this.settings.outputFolder}/`);
   }
   /** Keep a copy's pfn-source pointing at its source when the source moves. */
   async handleSourceRename(newFile, oldPath) {
+    this.forget(oldPath);
     for (const copy of this.outputFiles()) {
       const content = await this.app.vault.cachedRead(copy);
       if (readPfnSource(content) === oldPath) {
@@ -633,6 +673,7 @@ var PlayerSync = class {
           copy,
           content.replace(/^pfn-source\s*:.*$/m, `pfn-source: "${newFile.path}"`)
         );
+        this.forget(copy.path);
         return;
       }
     }
@@ -643,10 +684,11 @@ var PlayerSync = class {
 var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
-    this.settings = DEFAULT_SETTINGS;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS);
   }
   async onload() {
     await this.loadSettings();
+    this.sync = new PlayerSync(this.app, this.settings);
     this.addSettingTab(new PfnSettingTab(this.app, this));
     this.registerEditorExtension([
       pfnEditorExtension(() => this.settings.token),
@@ -699,29 +741,29 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
         if (!file || file.extension !== "md")
           return false;
         if (!checking)
-          void new PlayerSync(this.app, this.settings).syncFile(file);
+          void this.sync.syncFile(file);
         return true;
       }
     });
     this.addCommand({
       id: "sync-vault",
       name: "Sync all player copies (whole vault)",
-      callback: () => void new PlayerSync(this.app, this.settings).syncVault()
+      callback: () => void this.sync.syncVault()
     });
     this.addRibbonIcon(
       "eye",
       "Sync player-facing notes",
-      () => void new PlayerSync(this.app, this.settings).syncVault()
+      () => void this.sync.syncVault()
     );
     const autoSync = (0, import_obsidian3.debounce)(
-      (file) => void new PlayerSync(this.app, this.settings).syncFile(file),
+      (file) => void this.sync.syncFile(file),
       2e3,
       true
     );
     this.registerEvent(
       this.app.vault.on("rename", (f, oldPath) => {
         if (f instanceof import_obsidian3.TFile && f.extension === "md" && !f.path.startsWith(this.settings.outputFolder + "/") && !oldPath.startsWith(this.settings.outputFolder + "/")) {
-          void new PlayerSync(this.app, this.settings).handleSourceRename(f, oldPath);
+          void this.sync.handleSourceRename(f, oldPath);
         }
       })
     );
@@ -761,7 +803,7 @@ var PlayerFacingNotesPlugin = class extends import_obsidian3.Plugin {
     }
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    Object.assign(this.settings, DEFAULT_SETTINGS, await this.loadData());
   }
   async saveSettings() {
     await this.saveData(this.settings);

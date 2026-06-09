@@ -5,10 +5,12 @@ import { DEFAULT_SETTINGS, PfnSettings, PfnSettingTab } from "./settings";
 import { PlayerSync } from "./sync";
 
 export default class PlayerFacingNotesPlugin extends Plugin {
-  settings: PfnSettings = DEFAULT_SETTINGS;
+  settings: PfnSettings = Object.assign({}, DEFAULT_SETTINGS);
+  sync!: PlayerSync;
 
   async onload() {
     await this.loadSettings();
+    this.sync = new PlayerSync(this.app, this.settings);
     this.addSettingTab(new PfnSettingTab(this.app, this));
 
     // Live Preview decorations + eye gutter
@@ -80,7 +82,7 @@ export default class PlayerFacingNotesPlugin extends Plugin {
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md") return false;
-        if (!checking) void new PlayerSync(this.app, this.settings).syncFile(file);
+        if (!checking) void this.sync.syncFile(file);
         return true;
       },
     });
@@ -88,16 +90,16 @@ export default class PlayerFacingNotesPlugin extends Plugin {
     this.addCommand({
       id: "sync-vault",
       name: "Sync all player copies (whole vault)",
-      callback: () => void new PlayerSync(this.app, this.settings).syncVault(),
+      callback: () => void this.sync.syncVault(),
     });
 
     this.addRibbonIcon("eye", "Sync player-facing notes", () =>
-      void new PlayerSync(this.app, this.settings).syncVault()
+      void this.sync.syncVault()
     );
 
     // Optional auto-sync of modified notes
     const autoSync = debounce(
-      (file: TFile) => void new PlayerSync(this.app, this.settings).syncFile(file),
+      (file: TFile) => void this.sync.syncFile(file),
       2000,
       true
     );
@@ -111,7 +113,7 @@ export default class PlayerFacingNotesPlugin extends Plugin {
           !f.path.startsWith(this.settings.outputFolder + "/") &&
           !oldPath.startsWith(this.settings.outputFolder + "/")
         ) {
-          void new PlayerSync(this.app, this.settings).handleSourceRename(f, oldPath);
+          void this.sync.handleSourceRename(f, oldPath);
         }
       })
     );
@@ -160,7 +162,8 @@ export default class PlayerFacingNotesPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Mutate in place: PlayerSync holds a reference to this object.
+    Object.assign(this.settings, DEFAULT_SETTINGS, await this.loadData());
   }
 
   async saveSettings() {

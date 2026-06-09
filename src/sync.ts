@@ -12,7 +12,24 @@ function defaultPlayerPath(file: TFile, settings: PfnSettings): string {
 /** Path without .md extension, for wikilink targets. */
 const linkTarget = (path: string) => path.replace(/\.md$/, "");
 
+interface CacheEntry<T> {
+  mtime: number;
+  size: number;
+  token: string;
+  value: T;
+}
+
+/**
+ * One long-lived instance per plugin. File-level facts (has regions /
+ * pfn-source) are cached by mtime+size, so repeated syncs — especially
+ * auto-sync on save — only re-read files that actually changed.
+ */
 export class PlayerSync {
+  /** source path -> has at least one ::pf region */
+  private regionCache = new Map<string, CacheEntry<boolean>>();
+  /** copy path -> its pfn-source property */
+  private sourceCache = new Map<string, CacheEntry<string | null>>();
+
   constructor(private app: App, private settings: PfnSettings) {}
 
   private outPrefix(): string {
@@ -29,6 +46,49 @@ export class PlayerSync {
     return this.app.vault.getMarkdownFiles().filter((f) => f.path.startsWith(out));
   }
 
+  private cached<T>(cache: Map<string, CacheEntry<T>>, f: TFile): T | undefined {
+    const c = cache.get(f.path);
+    return c &&
+      c.mtime === f.stat.mtime &&
+      c.size === f.stat.size &&
+      c.token === this.settings.token
+      ? c.value
+      : undefined;
+  }
+
+  private store<T>(cache: Map<string, CacheEntry<T>>, f: TFile, value: T): T {
+    cache.set(f.path, {
+      mtime: f.stat.mtime,
+      size: f.stat.size,
+      token: this.settings.token,
+      value,
+    });
+    return value;
+  }
+
+  private async hasRegions(f: TFile): Promise<boolean> {
+    const hit = this.cached(this.regionCache, f);
+    if (hit !== undefined) return hit;
+    const text = await this.app.vault.cachedRead(f);
+    return this.store(
+      this.regionCache,
+      f,
+      findRegions(text.split("\n"), this.settings.token).length > 0
+    );
+  }
+
+  private async pfnSourceOf(f: TFile): Promise<string | null> {
+    const hit = this.cached(this.sourceCache, f);
+    if (hit !== undefined) return hit;
+    return this.store(this.sourceCache, f, readPfnSource(await this.app.vault.cachedRead(f)));
+  }
+
+  /** Drop cache entries for a path (rename/delete housekeeping). */
+  forget(path: string): void {
+    this.regionCache.delete(path);
+    this.sourceCache.delete(path);
+  }
+
   /**
    * Index existing player copies by their pfn-source property. The user may
    * move/rename copies anywhere inside the output folder — we follow the
@@ -38,7 +98,7 @@ export class PlayerSync {
   private async copyIndex(): Promise<Map<string, TFile>> {
     const idx = new Map<string, TFile>();
     for (const f of this.outputFiles()) {
-      const src = readPfnSource(await this.app.vault.cachedRead(f));
+      const src = await this.pfnSourceOf(f);
       if (src && !idx.has(src)) idx.set(src, f);
     }
     return idx;
@@ -51,8 +111,7 @@ export class PlayerSync {
   ): Promise<Map<string, string>> {
     const set = new Map<string, string>();
     for (const f of files) {
-      const text = await this.app.vault.cachedRead(f);
-      if (findRegions(text.split("\n"), this.settings.token).length > 0) {
+      if (await this.hasRegions(f)) {
         const existing = copies.get(f.path);
         set.set(
           f.path,
@@ -162,14 +221,16 @@ export class PlayerSync {
     const files = this.sourceFiles();
     const playerSet = await this.collectPlayerSet(files, copies);
     let written = 0;
+    // Only files with player content need writing; stale copies are pruned below.
     for (const f of files) {
-      if (await this.writeCopy(f, playerSet, copies)) written++;
+      if (playerSet.has(f.path) && (await this.writeCopy(f, playerSet, copies))) written++;
     }
     // Prune copies whose source was deleted or no longer has regions.
     // Only files WITH pfn-source are plugin-owned; everything else is left alone.
     for (const [src, copy] of copies) {
       if (!playerSet.has(src)) {
         await this.app.vault.delete(copy).catch(() => {});
+        this.forget(copy.path);
       }
     }
     new Notice(`Player sync complete: ${written} note(s) in ${this.settings.outputFolder}/`);
@@ -177,6 +238,7 @@ export class PlayerSync {
 
   /** Keep a copy's pfn-source pointing at its source when the source moves. */
   async handleSourceRename(newFile: TFile, oldPath: string): Promise<void> {
+    this.forget(oldPath);
     for (const copy of this.outputFiles()) {
       const content = await this.app.vault.cachedRead(copy);
       if (readPfnSource(content) === oldPath) {
@@ -184,6 +246,7 @@ export class PlayerSync {
           copy,
           content.replace(/^pfn-source\s*:.*$/m, `pfn-source: "${newFile.path}"`)
         );
+        this.forget(copy.path);
         return;
       }
     }

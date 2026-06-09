@@ -1,0 +1,17 @@
+{
+  "name": "player-facing-notes",
+  "version": "0.1.0",
+  "description": "Obsidian plugin: flag content blocks as player-facing; publish only those blocks.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "deploy": "npm run build && node deploy.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.0",
+    "obsidian": "latest",
+    "t

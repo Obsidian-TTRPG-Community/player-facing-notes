@@ -1,0 +1,9 @@
+{
+  "id": "player-facing-notes",
+  "name": "Player Facing Notes",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Flag blocks of content as player-facing and publish only those blocks via Obsidian Publish, using a generated player-safe mirror folder.",
+  "author": "Josh",
+  "isDesktopOnly": false
+}

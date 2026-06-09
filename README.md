@@ -34,6 +34,7 @@ Player copies are tracked by the `pfn-source` property in their frontmatter, **n
 - Notes you create inside the player folder *without* `pfn-source` are never touched or pruned — handy for player-only index pages.
 - Moving or renaming a *source* note updates its copy's `pfn-source` automatically, so your layout survives vault reorganizations.
 - Wikilinks in copies always point at the copy's current location.
+- **Rename copies with Obsidian's normal rename** (click the title or F2). The `pfn-source` property is the sync connection, so the new name sticks — and links in other player notes display the copy's player-facing name, never the original DM-side note name (unless you wrote an explicit alias).
 
 ## Link handling
 

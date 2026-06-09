@@ -88,11 +88,13 @@ export function rewriteLinks(
     (full, embed: string, path: string, hash: string | undefined, alias: string | undefined) => {
       const target = resolveLink(path.trim());
       if (target === undefined) return full; // leave untouched
-      const display = alias ?? path.trim();
       if (target === null) {
         // DM-only target: flatten to plain text so nothing leaks.
-        return embed ? "" : display;
+        return embed ? "" : alias ?? path.trim();
       }
+      // Display the copy's (player-facing) name, not the DM-side note name —
+      // the user may have renamed the copy in the player folder.
+      const display = alias ?? target.split("/").pop()!;
       return `${embed}[[${target}${hash ?? ""}|${display}]]`;
     }
   );

@@ -77,10 +77,10 @@ function rewriteLinks(line, resolveLink) {
       const target = resolveLink(path.trim());
       if (target === void 0)
         return full;
-      const display = alias ?? path.trim();
       if (target === null) {
-        return embed ? "" : display;
+        return embed ? "" : alias ?? path.trim();
       }
+      const display = alias ?? target.split("/").pop();
       return `${embed}[[${target}${hash ?? ""}|${display}]]`;
     }
   );

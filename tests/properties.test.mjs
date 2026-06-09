@@ -21,3 +21,17 @@ test("readPfnSource reads quoted and bare values", () => {
   assert.equal(readPfnSource("---\npublish: true\n---\n"), null);
   assert.equal(readPfnSource("no frontmatter"), null);
 });
+
+test("rewritten links display the copy's player-facing name after rename", async () => {
+  const { rewriteLinks } = await import("./parser.bundle.mjs");
+  const resolve = (p) => (p === "Kurisutaru, Secret Dragon" ? "_player/NPCs/Strange Crane" : undefined);
+  assert.equal(
+    rewriteLinks("You spot [[Kurisutaru, Secret Dragon]] nearby.", resolve),
+    "You spot [[_player/NPCs/Strange Crane|Strange Crane]] nearby."
+  );
+  // Explicit alias always wins
+  assert.equal(
+    rewriteLinks("[[Kurisutaru, Secret Dragon|the crane]]", resolve),
+    "[[_player/NPCs/Strange Crane|the crane]]"
+  );
+});

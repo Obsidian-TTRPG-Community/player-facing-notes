@@ -6,7 +6,8 @@ Built for Dungeon Masters who keep campaign notes and player handouts in one pla
 
 ## How it works
 
-1. **Flag content.** Three ways, no syntax to remember:
+1. **Flag content.** Four ways, no syntax to remember:
+   - **Whole note** — add the `pfn` property (checkbox) at the top of the note, or run *Toggle player-facing for entire note*. Everything after the frontmatter publishes; the editor tints the whole note to show it.
    - **Gutter eyes** — hover the left gutter: a closed eye appears at each block. Click it and the whole block (paragraph, callout, code fence, heading) becomes player-facing; the eye opens and stays cyan. Click an open eye to revoke.
    - **Right-click** — *Show block/selection to players* or *Hide from players*.
    - **Command palette** — *Toggle player-facing on selection or block* (assignable to a hotkey).

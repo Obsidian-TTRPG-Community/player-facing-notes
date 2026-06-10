@@ -88,6 +88,19 @@ function rewriteLinks(line, resolveLink) {
 }
 function buildPlayerBody(source, opts) {
   const lines = source.split("\n");
+  if (isWholeNoteFlagged(lines)) {
+    const fm = frontmatterRange(lines);
+    let body = lines.slice(fm ? fm[1] : 0).map((l) => markerRegex(opts.token).test(l) ? "" : l).filter((l, i, arr) => !(l.trim() === "" && arr[i - 1]?.trim() === ""));
+    while (body.length && body[0].trim() === "")
+      body.shift();
+    while (body.length && body[body.length - 1].trim() === "")
+      body.pop();
+    if (body.length === 0)
+      return null;
+    if (opts.resolveLink)
+      body = body.map((l) => rewriteLinks(l, opts.resolveLink));
+    return body.join("\n");
+  }
   const regions = findRegions(lines, opts.token);
   if (regions.length === 0)
     return null;
@@ -107,6 +120,16 @@ function buildPlayerBody(source, opts) {
     chunks.push(chunk.join("\n"));
   }
   return chunks.join("\n\n");
+}
+function isWholeNoteFlagged(lines) {
+  const fm = frontmatterRange(lines);
+  if (!fm)
+    return false;
+  for (let i = 1; i < fm[1] - 1; i++) {
+    if (/^pfn\s*:\s*(true|yes)\s*$/i.test(lines[i]))
+      return true;
+  }
+  return false;
 }
 function readPfnSource(content) {
   const lines = content.split("\n");
@@ -258,6 +281,17 @@ function pfnEditorExtension(getToken) {
         const sel = view.state.selection.main;
         const ranges = [];
         let inside = false;
+        const allLines = doc.toString().split("\n");
+        if (isWholeNoteFlagged(allLines)) {
+          const fm = frontmatterRange(allLines);
+          for (let n = (fm ? fm[1] : 0) + 1; n <= doc.lines; n++) {
+            ranges.push({ from: doc.line(n).from, to: doc.line(n).from, deco: insideLine });
+          }
+          return import_view.Decoration.set(
+            ranges.map((r) => r.deco.range(r.from, r.to)),
+            true
+          );
+        }
         for (let n = 1; n <= doc.lines; n++) {
           const line = doc.line(n);
           const cursorHere = sel.from <= line.to && sel.to >= line.from;
@@ -318,7 +352,11 @@ function parsedDoc(doc, token) {
   let c = docCache.get(doc);
   if (!c) {
     const lines = doc.toString().split("\n");
-    c = { lines, regions: findRegions(lines, token) };
+    c = {
+      lines,
+      regions: findRegions(lines, token),
+      wholeNote: isWholeNoteFlagged(lines)
+    };
     docCache.set(doc, c);
   }
   return c;
@@ -357,7 +395,9 @@ function pfnGutter(getToken) {
     lineMarker(view, lineBlock) {
       const token = getToken();
       const lineNo = view.state.doc.lineAt(lineBlock.from).number - 1;
-      const { lines, regions } = parsedDoc(view.state.doc, token);
+      const { lines, regions, wholeNote } = parsedDoc(view.state.doc, token);
+      if (wholeNote)
+        return null;
       const region = regionContaining(regions, lineNo);
       if (region)
         return region.startLine === lineNo ? EYE_ON : null;
@@ -373,7 +413,9 @@ function pfnGutter(getToken) {
         const e = event;
         const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
         let lineNo = view.state.doc.lineAt(pos).number - 1;
-        const { lines } = parsedDoc(view.state.doc, token);
+        const { lines, wholeNote } = parsedDoc(view.state.doc, token);
+        if (wholeNote)
+          return true;
         if (lines[lineNo]?.trim() === "") {
           for (let d = 1; d <= 3 && lineNo + d < lines.length; d++) {
             if (lines[lineNo + d].trim() !== "") {
@@ -515,10 +557,11 @@ var PlayerSync = class {
     if (hit !== void 0)
       return hit;
     const text = await this.app.vault.cachedRead(f);
+    const lines = text.split("\n");
     return this.store(
       this.regionCache,
       f,
-      findRegions(text.split("\n"), this.settings.token).length > 0
+      isWholeNoteFlagged(lines) || findRegions(lines, this.settings.token).length > 0
     );
   }
   async pfnSourceOf(f) {
@@ -730,6 +773,24 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
         const to = editor.getCursor("to").line;
         const plan = editor.somethingSelected() && from !== to ? planWrapRange(lines, from, to, token) ?? planToggle(lines, from, token) : planToggle(lines, from, token);
         this.applyPlan(editor, plan);
+      }
+    });
+    this.addCommand({
+      id: "toggle-whole-note",
+      name: "Toggle player-facing for entire note",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md")
+          return false;
+        if (!checking) {
+          void this.app.fileManager.processFrontMatter(file, (fm) => {
+            if (fm.pfn)
+              delete fm.pfn;
+            else
+              fm.pfn = true;
+          });
+        }
+        return true;
       }
     });
     this.addCommand({

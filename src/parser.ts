@@ -115,6 +115,24 @@ export function buildPlayerBody(
   opts: ParserOptions
 ): string | null {
   const lines = source.split("\n");
+
+  // Whole-note flag: everything after frontmatter is player-facing
+  // (any stray region markers are stripped).
+  if (isWholeNoteFlagged(lines)) {
+    const fm = frontmatterRange(lines);
+    // Replace marker lines with blanks (keeps paragraphs separated), then
+    // collapse runs of blank lines.
+    let body = lines
+      .slice(fm ? fm[1] : 0)
+      .map((l) => (markerRegex(opts.token).test(l) ? "" : l))
+      .filter((l, i, arr) => !(l.trim() === "" && arr[i - 1]?.trim() === ""));
+    while (body.length && body[0].trim() === "") body.shift();
+    while (body.length && body[body.length - 1].trim() === "") body.pop();
+    if (body.length === 0) return null;
+    if (opts.resolveLink) body = body.map((l) => rewriteLinks(l, opts.resolveLink!));
+    return body.join("\n");
+  }
+
   const regions = findRegions(lines, opts.token);
   if (regions.length === 0) return null;
 
@@ -149,6 +167,16 @@ export function buildPlayerCopy(
   for (const [k, v] of Object.entries(extraFrontmatter)) fm.push(`${k}: ${v}`);
   fm.push("---");
   return { content: fm.join("\n") + "\n\n" + body + "\n", regionCount };
+}
+
+/** True when the note's frontmatter flags the WHOLE note as player-facing. */
+export function isWholeNoteFlagged(lines: string[]): boolean {
+  const fm = frontmatterRange(lines);
+  if (!fm) return false;
+  for (let i = 1; i < fm[1] - 1; i++) {
+    if (/^pfn\s*:\s*(true|yes)\s*$/i.test(lines[i])) return true;
+  }
+  return false;
 }
 
 /** Read the pfn-source property from a player copy's raw content. */

@@ -1,5 +1,5 @@
 import { App, Notice, TFile, normalizePath } from "obsidian";
-import { buildPlayerBody, findRegions, frontmatterRange, readPfnSource } from "./parser";
+import { buildPlayerBody, findRegions, frontmatterRange, isWholeNoteFlagged, readPfnSource } from "./parser";
 import type { PfnSettings } from "./settings";
 
 const isMarkdown = (f: TFile) => f.extension === "md";
@@ -70,10 +70,11 @@ export class PlayerSync {
     const hit = this.cached(this.regionCache, f);
     if (hit !== undefined) return hit;
     const text = await this.app.vault.cachedRead(f);
+    const lines = text.split("\n");
     return this.store(
       this.regionCache,
       f,
-      findRegions(text.split("\n"), this.settings.token).length > 0
+      isWholeNoteFlagged(lines) || findRegions(lines, this.settings.token).length > 0
     );
   }
 

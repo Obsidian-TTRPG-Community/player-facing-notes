@@ -35,3 +35,12 @@ test("rewritten links display the copy's player-facing name after rename", async
     "[[_player/NPCs/Strange Crane|the crane]]"
   );
 });
+
+test("whole-note flag publishes everything after frontmatter", async () => {
+  const { buildPlayerBody, isWholeNoteFlagged } = await import("./parser.bundle.mjs");
+  const src = ["---", "pfn: true", "tags: [x]", "---", "# Title", "", "All of this.", "::pf", "old region", "::/pf"].join("\n");
+  assert.ok(isWholeNoteFlagged(src.split("\n")));
+  assert.equal(buildPlayerBody(src, { token: "pf" }), "# Title\n\nAll of this.\n\nold region");
+  assert.ok(!isWholeNoteFlagged(["---", "pfn: false", "---", "x"]));
+  assert.ok(!isWholeNoteFlagged(["no frontmatter, pfn: true"]));
+});

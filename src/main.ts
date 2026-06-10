@@ -77,6 +77,22 @@ export default class PlayerFacingNotesPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "toggle-whole-note",
+      name: "Toggle player-facing for entire note",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) {
+          void this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+            if (fm.pfn) delete fm.pfn;
+            else fm.pfn = true;
+          });
+        }
+        return true;
+      },
+    });
+
+    this.addCommand({
       id: "sync-current-note",
       name: "Sync player copy of current note",
       checkCallback: (checking) => {

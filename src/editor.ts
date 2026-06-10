@@ -15,8 +15,10 @@ import {
   PfRegion,
   blockAt,
   findRegions,
+  frontmatterRange,
   isEndMarker,
   isStartMarker,
+  isWholeNoteFlagged,
   planToggle,
   regionContaining,
 } from "./parser";
@@ -66,6 +68,19 @@ export function pfnEditorExtension(getToken: () => string) {
         const sel = view.state.selection.main;
         const ranges: { from: number; to: number; deco: Decoration }[] = [];
         let inside = false;
+
+        // Whole-note flag: tint everything after the frontmatter.
+        const allLines = doc.toString().split("\n");
+        if (isWholeNoteFlagged(allLines)) {
+          const fm = frontmatterRange(allLines);
+          for (let n = (fm ? fm[1] : 0) + 1; n <= doc.lines; n++) {
+            ranges.push({ from: doc.line(n).from, to: doc.line(n).from, deco: insideLine });
+          }
+          return Decoration.set(
+            ranges.map((r) => r.deco.range(r.from, r.to)),
+            true
+          );
+        }
 
         for (let n = 1; n <= doc.lines; n++) {
           const line = doc.line(n);
@@ -129,12 +144,19 @@ const EYE_ON = new EyeMarker(true);
 const EYE_OFF = new EyeMarker(false);
 
 // Cache parsed lines/regions per document snapshot.
-const docCache = new WeakMap<CMText, { lines: string[]; regions: PfRegion[] }>();
+const docCache = new WeakMap<
+  CMText,
+  { lines: string[]; regions: PfRegion[]; wholeNote: boolean }
+>();
 function parsedDoc(doc: CMText, token: string) {
   let c = docCache.get(doc);
   if (!c) {
     const lines = doc.toString().split("\n");
-    c = { lines, regions: findRegions(lines, token) };
+    c = {
+      lines,
+      regions: findRegions(lines, token),
+      wholeNote: isWholeNoteFlagged(lines),
+    };
     docCache.set(doc, c);
   }
   return c;
@@ -178,7 +200,8 @@ export function pfnGutter(getToken: () => string) {
     lineMarker(view, lineBlock) {
       const token = getToken();
       const lineNo = view.state.doc.lineAt(lineBlock.from).number - 1;
-      const { lines, regions } = parsedDoc(view.state.doc, token);
+      const { lines, regions, wholeNote } = parsedDoc(view.state.doc, token);
+      if (wholeNote) return null; // entire note is player-facing
       const region = regionContaining(regions, lineNo);
       if (region) return region.startLine === lineNo ? EYE_ON : null;
       const block = blockAt(lines, lineNo, token);
@@ -196,7 +219,8 @@ export function pfnGutter(getToken: () => string) {
         const e = event as MouseEvent;
         const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
         let lineNo = view.state.doc.lineAt(pos).number - 1;
-        const { lines } = parsedDoc(view.state.doc, token);
+        const { lines, wholeNote } = parsedDoc(view.state.doc, token);
+        if (wholeNote) return true; // nothing to toggle per block
         // If the click landed on a blank line (content shifted under the
         // pointer), snap to the next block start within a few lines.
         if (lines[lineNo]?.trim() === "") {

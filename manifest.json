@@ -1,7 +1,7 @@
 {
   "id": "player-facing-notes",
   "name": "Player Facing Notes",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.6.6",
   "description": "Selectively publish parts of your notes. Flag blocks as public, then sync them into publish-ready copies, keeping secrets, drafts, and private content out of your published site.",
   "author": "Josh Plunkett",

@@ -2,8 +2,10 @@
 
 ## One-time setup
 
+The repo lives at <https://github.com/Obsidian-TTRPG-Community/player-facing-notes>
+(already configured as `origin`).
+
 ```bash
-git remote add origin https://github.com/<your-username>/player-facing-notes.git
 git push -u origin main
 ```
 
@@ -33,6 +35,7 @@ git push -u origin main
 After the 1.1.1 release is published:
 
 1. Fork <https://github.com/obsidianmd/obsidian-releases>.
+   (Submit from your personal account; the plugin repo stays under the org.)
 2. Add an entry to the END of `community-plugins.json`:
 
    ```json
@@ -41,7 +44,7 @@ After the 1.1.1 release is published:
      "name": "Player Facing Notes",
      "author": "Josh Plunkett",
      "description": "Selectively publish parts of your notes. Flag blocks as public, then sync them into publish-ready copies, keeping secrets, drafts, and private content out of your published site.",
-     "repo": "<your-username>/player-facing-notes"
+     "repo": "Obsidian-TTRPG-Community/player-facing-notes"
    }
    ```
 

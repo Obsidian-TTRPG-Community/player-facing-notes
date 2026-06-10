@@ -33,6 +33,19 @@ export default class PlayerFacingNotesPlugin extends Plugin {
         const cursorLine = editor.getCursor("from").line;
         const inRegion = !!regionContaining(findRegions(lines, token), cursorLine);
 
+        const file = this.app.workspace.getActiveFile();
+        if (file && !file.path.startsWith(this.settings.outputFolder + "/")) {
+          const on = this.isWholeNoteOn(file);
+          menu.addItem((item) =>
+            item
+              .setTitle(on ? "Hide entire note from players" : "Show entire note to players")
+              .setIcon(on ? "eye-off" : "eye")
+              .setSection("pfn")
+              .onClick(() => this.toggleWholeNote(file))
+          );
+          if (on) return; // block-level items are meaningless while the whole note is shown
+        }
+
         if (inRegion) {
           menu.addItem((item) =>
             item
@@ -60,6 +73,22 @@ export default class PlayerFacingNotesPlugin extends Plugin {
       })
     );
 
+    // File menu: whole-note toggle (file explorer, tab, and ⋮ menus)
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!(file instanceof TFile) || file.extension !== "md") return;
+        if (file.path.startsWith(this.settings.outputFolder + "/")) return;
+        const on = this.isWholeNoteOn(file);
+        menu.addItem((item) =>
+          item
+            .setTitle(on ? "Hide entire note from players" : "Show entire note to players")
+            .setIcon(on ? "eye-off" : "eye")
+            .setSection("pfn")
+            .onClick(() => this.toggleWholeNote(file))
+        );
+      })
+    );
+
     this.addCommand({
       id: "toggle-player-facing",
       name: "Toggle player-facing on selection or block",
@@ -82,12 +111,7 @@ export default class PlayerFacingNotesPlugin extends Plugin {
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md") return false;
-        if (!checking) {
-          void this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
-            if (fm.pfn) delete fm.pfn;
-            else fm.pfn = true;
-          });
-        }
+        if (!checking) this.toggleWholeNote(file);
         return true;
       },
     });
@@ -146,6 +170,19 @@ export default class PlayerFacingNotesPlugin extends Plugin {
         }
       })
     );
+  }
+
+  /** Is the whole-note flag set (via metadata cache)? */
+  private isWholeNoteOn(file: TFile): boolean {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return !!fm?.pfn;
+  }
+
+  private toggleWholeNote(file: TFile): void {
+    void this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+      if (fm.pfn) delete fm.pfn;
+      else fm.pfn = true;
+    });
   }
 
   /** Apply a wrap/unwrap plan through the Obsidian editor API. */

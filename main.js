@@ -747,6 +747,15 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
         const lines = editor.getValue().split("\n");
         const cursorLine = editor.getCursor("from").line;
         const inRegion = !!regionContaining(findRegions(lines, token), cursorLine);
+        const file = this.app.workspace.getActiveFile();
+        if (file && !file.path.startsWith(this.settings.outputFolder + "/")) {
+          const on = this.isWholeNoteOn(file);
+          menu.addItem(
+            (item) => item.setTitle(on ? "Hide entire note from players" : "Show entire note to players").setIcon(on ? "eye-off" : "eye").setSection("pfn").onClick(() => this.toggleWholeNote(file))
+          );
+          if (on)
+            return;
+        }
         if (inRegion) {
           menu.addItem(
             (item) => item.setTitle("Hide from players").setIcon("eye-off").setSection("pfn").onClick(() => this.applyPlan(editor, planToggle(lines, cursorLine, token)))
@@ -761,6 +770,18 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
             })
           );
         }
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!(file instanceof import_obsidian4.TFile) || file.extension !== "md")
+          return;
+        if (file.path.startsWith(this.settings.outputFolder + "/"))
+          return;
+        const on = this.isWholeNoteOn(file);
+        menu.addItem(
+          (item) => item.setTitle(on ? "Hide entire note from players" : "Show entire note to players").setIcon(on ? "eye-off" : "eye").setSection("pfn").onClick(() => this.toggleWholeNote(file))
+        );
       })
     );
     this.addCommand({
@@ -782,14 +803,8 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md")
           return false;
-        if (!checking) {
-          void this.app.fileManager.processFrontMatter(file, (fm) => {
-            if (fm.pfn)
-              delete fm.pfn;
-            else
-              fm.pfn = true;
-          });
-        }
+        if (!checking)
+          this.toggleWholeNote(file);
         return true;
       }
     });
@@ -834,6 +849,19 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
         }
       })
     );
+  }
+  /** Is the whole-note flag set (via metadata cache)? */
+  isWholeNoteOn(file) {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return !!fm?.pfn;
+  }
+  toggleWholeNote(file) {
+    void this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (fm.pfn)
+        delete fm.pfn;
+      else
+        fm.pfn = true;
+    });
   }
   /** Apply a wrap/unwrap plan through the Obsidian editor API. */
   applyPlan(editor, plan) {

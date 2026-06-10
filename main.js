@@ -43,12 +43,10 @@ function isEndMarker(line, token) {
   return !!m && m[2] === "/";
 }
 function frontmatterRange(lines) {
-  if (lines[0]?.trim() !== "---")
-    return null;
+  if (lines[0]?.trim() !== "---") return null;
   for (let i = 1; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (t === "---" || t === "...")
-      return [0, i + 1];
+    if (t === "---" || t === "...") return [0, i + 1];
   }
   return null;
 }
@@ -59,8 +57,7 @@ function findRegions(lines, token) {
   let open = null;
   for (; i < lines.length; i++) {
     if (open === null) {
-      if (isStartMarker(lines[i], token))
-        open = i;
+      if (isStartMarker(lines[i], token)) open = i;
     } else if (isEndMarker(lines[i], token)) {
       regions.push({ startLine: open, endLine: i, unclosed: false });
       open = null;
@@ -76,8 +73,7 @@ function rewriteLinks(line, resolveLink) {
     /(!?)\[\[([^\]|#]+)(#[^\]|]*)?(?:\|([^\]]*))?\]\]/g,
     (full, embed, path, hash, alias) => {
       const target = resolveLink(path.trim());
-      if (target === void 0)
-        return full;
+      if (target === void 0) return full;
       if (target === null) {
         return embed ? "" : alias ?? path.trim();
       }
@@ -91,55 +87,42 @@ function buildPlayerBody(source, opts) {
   if (isWholeNoteFlagged(lines)) {
     const fm = frontmatterRange(lines);
     let body = lines.slice(fm ? fm[1] : 0).map((l) => markerRegex(opts.token).test(l) ? "" : l).filter((l, i, arr) => !(l.trim() === "" && arr[i - 1]?.trim() === ""));
-    while (body.length && body[0].trim() === "")
-      body.shift();
-    while (body.length && body[body.length - 1].trim() === "")
-      body.pop();
-    if (body.length === 0)
-      return null;
-    if (opts.resolveLink)
-      body = body.map((l) => rewriteLinks(l, opts.resolveLink));
+    while (body.length && body[0].trim() === "") body.shift();
+    while (body.length && body[body.length - 1].trim() === "") body.pop();
+    if (body.length === 0) return null;
+    if (opts.resolveLink) body = body.map((l) => rewriteLinks(l, opts.resolveLink));
     return body.join("\n");
   }
   const regions = findRegions(lines, opts.token);
-  if (regions.length === 0)
-    return null;
+  if (regions.length === 0) return null;
   const chunks = [];
   for (const r of regions) {
     const from = r.startLine + 1;
     const to = r.unclosed ? r.endLine + 1 : r.endLine;
     let chunk = lines.slice(from, to);
-    while (chunk.length && chunk[0].trim() === "")
-      chunk.shift();
-    while (chunk.length && chunk[chunk.length - 1].trim() === "")
-      chunk.pop();
-    if (chunk.length === 0)
-      continue;
-    if (opts.resolveLink)
-      chunk = chunk.map((l) => rewriteLinks(l, opts.resolveLink));
+    while (chunk.length && chunk[0].trim() === "") chunk.shift();
+    while (chunk.length && chunk[chunk.length - 1].trim() === "") chunk.pop();
+    if (chunk.length === 0) continue;
+    if (opts.resolveLink) chunk = chunk.map((l) => rewriteLinks(l, opts.resolveLink));
     chunks.push(chunk.join("\n"));
   }
   return chunks.join("\n\n");
 }
 function isWholeNoteFlagged(lines) {
   const fm = frontmatterRange(lines);
-  if (!fm)
-    return false;
+  if (!fm) return false;
   for (let i = 1; i < fm[1] - 1; i++) {
-    if (/^pfn\s*:\s*(true|yes)\s*$/i.test(lines[i]))
-      return true;
+    if (/^pfn\s*:\s*(true|yes)\s*$/i.test(lines[i])) return true;
   }
   return false;
 }
 function readPfnSource(content) {
   const lines = content.split("\n");
   const fm = frontmatterRange(lines);
-  if (!fm)
-    return null;
+  if (!fm) return null;
   for (let i = 1; i < fm[1] - 1; i++) {
     const m = lines[i].match(/^pfn-source:\s*["']?(.*?)["']?\s*$/);
-    if (m && m[1])
-      return m[1];
+    if (m && m[1]) return m[1];
   }
   return null;
 }
@@ -150,12 +133,10 @@ function regionContaining(regions, line) {
   return regions.find((r) => line >= r.startLine && line <= r.endLine) ?? null;
 }
 function blockAt(lines, idx, token) {
-  if (idx < 0 || idx >= lines.length)
-    return null;
+  if (idx < 0 || idx >= lines.length) return null;
   const fm = frontmatterRange(lines);
   const start = fm ? fm[1] : 0;
-  if (idx < start)
-    return null;
+  if (idx < start) return null;
   const line = lines[idx];
   const isMarker = (l) => markerRegex(token).test(l);
   let fenceOpen = -1;
@@ -180,26 +161,20 @@ function blockAt(lines, idx, token) {
     }
     return { from: open, to: close };
   }
-  if (line.trim() === "" || isMarker(line))
-    return null;
-  if (/^\s{0,3}#{1,6}\s/.test(line))
-    return { from: idx, to: idx };
+  if (line.trim() === "" || isMarker(line)) return null;
+  if (/^\s{0,3}#{1,6}\s/.test(line)) return { from: idx, to: idx };
   if (isBlockquote(line)) {
     let from2 = idx;
     let to2 = idx;
-    while (from2 > start && isBlockquote(lines[from2 - 1]) && !isMarker(lines[from2 - 1]))
-      from2--;
-    while (to2 < lines.length - 1 && isBlockquote(lines[to2 + 1]) && !isMarker(lines[to2 + 1]))
-      to2++;
+    while (from2 > start && isBlockquote(lines[from2 - 1]) && !isMarker(lines[from2 - 1])) from2--;
+    while (to2 < lines.length - 1 && isBlockquote(lines[to2 + 1]) && !isMarker(lines[to2 + 1])) to2++;
     return { from: from2, to: to2 };
   }
   const boundary = (l) => l.trim() === "" || isMarker(l) || isBlockquote(l) || isFenceDelim(l) || /^\s{0,3}#{1,6}\s/.test(l);
   let from = idx;
   let to = idx;
-  while (from > start && !boundary(lines[from - 1]))
-    from--;
-  while (to < lines.length - 1 && !boundary(lines[to + 1]))
-    to++;
+  while (from > start && !boundary(lines[from - 1])) from--;
+  while (to < lines.length - 1 && !boundary(lines[to + 1])) to++;
   return { from, to };
 }
 function markersFor(lines, from, to, token) {
@@ -221,22 +196,17 @@ function planToggle(lines, idx, token) {
     };
   }
   const block = blockAt(lines, idx, token);
-  if (!block)
-    return null;
+  if (!block) return null;
   const m = markersFor(lines, block.from, block.to, token);
   return { kind: "wrap", from: block.from, to: block.to, startMarker: m.start, endMarker: m.end };
 }
 function planWrapRange(lines, from, to, token) {
-  while (from < to && lines[from].trim() === "")
-    from++;
-  while (to > from && lines[to].trim() === "")
-    to--;
-  if (lines[from].trim() === "")
-    return null;
+  while (from < to && lines[from].trim() === "") from++;
+  while (to > from && lines[to].trim() === "") to--;
+  if (lines[from].trim() === "") return null;
   const regions = findRegions(lines, token);
   for (let i = from; i <= to; i++) {
-    if (regionContaining(regions, i) || markerRegex(token).test(lines[i]))
-      return null;
+    if (regionContaining(regions, i) || markerRegex(token).test(lines[i])) return null;
   }
   const m = markersFor(lines, from, to, token);
   return { kind: "wrap", from, to, startMarker: m.start, endMarker: m.end };
@@ -364,8 +334,7 @@ function parsedDoc(doc, token) {
 function toggleAtLineCM(view, idx, token) {
   const { lines } = parsedDoc(view.state.doc, token);
   const plan = planToggle(lines, idx, token);
-  if (!plan)
-    return false;
+  if (!plan) return false;
   const doc = view.state.doc;
   if (plan.kind === "unwrap") {
     const changes = [];
@@ -374,8 +343,7 @@ function toggleAtLineCM(view, idx, token) {
       changes.push({ from: l.from > 0 ? l.from - 1 : l.from, to: l.to });
     };
     del(plan.startLine);
-    if (plan.endLine !== null)
-      del(plan.endLine);
+    if (plan.endLine !== null) del(plan.endLine);
     view.dispatch({ changes });
   } else {
     const first = doc.line(plan.from + 1);
@@ -396,14 +364,11 @@ function pfnGutter(getToken) {
       const token = getToken();
       const lineNo = view.state.doc.lineAt(lineBlock.from).number - 1;
       const { lines, regions, wholeNote } = parsedDoc(view.state.doc, token);
-      if (wholeNote)
-        return null;
+      if (wholeNote) return null;
       const region = regionContaining(regions, lineNo);
-      if (region)
-        return region.startLine === lineNo ? EYE_ON : null;
+      if (region) return region.startLine === lineNo ? EYE_ON : null;
       const block = blockAt(lines, lineNo, token);
-      if (block && block.from === lineNo)
-        return EYE_OFF;
+      if (block && block.from === lineNo) return EYE_OFF;
       return null;
     },
     lineMarkerChange: (update) => update.docChanged || update.viewportChanged || update.geometryChanged,
@@ -414,8 +379,7 @@ function pfnGutter(getToken) {
         const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }, false);
         let lineNo = view.state.doc.lineAt(pos).number - 1;
         const { lines, wholeNote } = parsedDoc(view.state.doc, token);
-        if (wholeNote)
-          return true;
+        if (wholeNote) return true;
         if (lines[lineNo]?.trim() === "") {
           for (let d = 1; d <= 3 && lineNo + d < lines.length; d++) {
             if (lines[lineNo + d].trim() !== "") {
@@ -425,8 +389,7 @@ function pfnGutter(getToken) {
           }
         }
         const now = Date.now();
-        if (lastToggle.line === lineNo && now - lastToggle.time < 350)
-          return true;
+        if (lastToggle.line === lineNo && now - lastToggle.time < 350) return true;
         if (toggleAtLineCM(view, lineNo, token)) {
           lastToggle = { line: lineNo, time: now };
         }
@@ -453,16 +416,13 @@ function stripMarkersFromRendered(el, token) {
       const toClean = [];
       let t;
       while (t = walker.nextNode()) {
-        if (re.test((t.textContent ?? "").trim()) && t.instanceOf(Text))
-          toClean.push(t);
+        if (re.test((t.textContent ?? "").trim()) && t.instanceOf(Text)) toClean.push(t);
       }
       toClean.forEach((textNode) => {
         const prev = textNode.previousSibling;
         const next = textNode.nextSibling;
-        if (prev && prev.nodeName === "BR")
-          prev.remove();
-        else if (next && next.nodeName === "BR")
-          next.remove();
+        if (prev && prev.nodeName === "BR") prev.remove();
+        else if (next && next.nodeName === "BR") next.remove();
         textNode.remove();
       });
     }
@@ -554,8 +514,7 @@ var PlayerSync = class {
   }
   async hasRegions(f) {
     const hit = this.cached(this.regionCache, f);
-    if (hit !== void 0)
-      return hit;
+    if (hit !== void 0) return hit;
     const text = await this.app.vault.cachedRead(f);
     const lines = text.split("\n");
     return this.store(
@@ -566,8 +525,7 @@ var PlayerSync = class {
   }
   async pfnSourceOf(f) {
     const hit = this.cached(this.sourceCache, f);
-    if (hit !== void 0)
-      return hit;
+    if (hit !== void 0) return hit;
     return this.store(this.sourceCache, f, readPfnSource(await this.app.vault.cachedRead(f)));
   }
   /** Drop cache entries for a path (rename/delete housekeeping). */
@@ -585,8 +543,7 @@ var PlayerSync = class {
     const idx = /* @__PURE__ */ new Map();
     for (const f of this.outputFiles()) {
       const src = await this.pfnSourceOf(f);
-      if (src && !idx.has(src))
-        idx.set(src, f);
+      if (src && !idx.has(src)) idx.set(src, f);
     }
     return idx;
   }
@@ -623,8 +580,7 @@ var PlayerSync = class {
       const fm = frontmatterRange(lines);
       if (fm) {
         for (const l of lines.slice(1, fm[1] - 1)) {
-          if (!/^(publish|pfn-source)\s*:/.test(l))
-            userFm.push(l);
+          if (!/^(publish|pfn-source)\s*:/.test(l)) userFm.push(l);
         }
       }
     }
@@ -645,24 +601,20 @@ var PlayerSync = class {
       token: this.settings.token,
       resolveLink: (linkpath) => {
         const dest = this.app.metadataCache.getFirstLinkpathDest(linkpath, file.path);
-        if (!dest)
-          return void 0;
-        if (!isMarkdown(dest))
-          return void 0;
+        if (!dest) return void 0;
+        if (!isMarkdown(dest)) return void 0;
         return playerSet.get(dest.path) ?? null;
       }
     });
     const existing = copies.get(file.path) ?? null;
     if (body === null) {
-      if (existing)
-        await this.app.fileManager.trashFile(existing);
+      if (existing) await this.app.fileManager.trashFile(existing);
       return false;
     }
     if (existing) {
       const current = await this.app.vault.cachedRead(existing);
       const content2 = this.composeCopy(file.path, body, current);
-      if (current !== content2)
-        await this.app.vault.modify(existing, content2);
+      if (current !== content2) await this.app.vault.modify(existing, content2);
       return true;
     }
     const outPath = defaultPlayerPath(file, this.settings);
@@ -693,8 +645,7 @@ var PlayerSync = class {
     const playerSet = await this.collectPlayerSet(files, copies);
     let written = 0;
     for (const f of files) {
-      if (playerSet.has(f.path) && await this.writeCopy(f, playerSet, copies))
-        written++;
+      if (playerSet.has(f.path) && await this.writeCopy(f, playerSet, copies)) written++;
     }
     for (const [src, copy] of copies) {
       if (!playerSet.has(src)) {
@@ -741,8 +692,7 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
     );
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor) => {
-        if (!this.settings.contextMenu)
-          return;
+        if (!this.settings.contextMenu) return;
         const token = this.settings.token;
         const lines = editor.getValue().split("\n");
         const cursorLine = editor.getCursor("from").line;
@@ -753,8 +703,7 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
           menu.addItem(
             (item) => item.setTitle(on ? "Hide entire note from players" : "Show entire note to players").setIcon(on ? "eye-off" : "eye").setSection("pfn").onClick(() => this.toggleWholeNote(file))
           );
-          if (on)
-            return;
+          if (on) return;
         }
         if (inRegion) {
           menu.addItem(
@@ -774,10 +723,8 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
     );
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
-        if (!(file instanceof import_obsidian4.TFile) || file.extension !== "md")
-          return;
-        if (file.path.startsWith(this.settings.outputFolder + "/"))
-          return;
+        if (!(file instanceof import_obsidian4.TFile) || file.extension !== "md") return;
+        if (file.path.startsWith(this.settings.outputFolder + "/")) return;
         const on = this.isWholeNoteOn(file);
         menu.addItem(
           (item) => item.setTitle(on ? "Hide entire note from players" : "Show entire note to players").setIcon(on ? "eye-off" : "eye").setSection("pfn").onClick(() => this.toggleWholeNote(file))
@@ -801,10 +748,8 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
       name: "Toggle player-facing for entire note",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md")
-          return false;
-        if (!checking)
-          this.toggleWholeNote(file);
+        if (!file || file.extension !== "md") return false;
+        if (!checking) this.toggleWholeNote(file);
         return true;
       }
     });
@@ -813,10 +758,8 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
       name: "Sync player copy of current note",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md")
-          return false;
-        if (!checking)
-          void this.sync.syncFile(file);
+        if (!file || file.extension !== "md") return false;
+        if (!checking) void this.sync.syncFile(file);
         return true;
       }
     });
@@ -857,19 +800,15 @@ var PlayerFacingNotesPlugin = class extends import_obsidian4.Plugin {
   }
   toggleWholeNote(file) {
     void this.app.fileManager.processFrontMatter(file, (fm) => {
-      if (fm.pfn)
-        delete fm.pfn;
-      else
-        fm.pfn = true;
+      if (fm.pfn) delete fm.pfn;
+      else fm.pfn = true;
     });
   }
   /** Apply a wrap/unwrap plan through the Obsidian editor API. */
   applyPlan(editor, plan) {
-    if (!plan)
-      return;
+    if (!plan) return;
     if (plan.kind === "unwrap") {
-      if (plan.endLine !== null)
-        this.deleteLine(editor, plan.endLine);
+      if (plan.endLine !== null) this.deleteLine(editor, plan.endLine);
       this.deleteLine(editor, plan.startLine);
     } else {
       const endLineText = editor.getLine(plan.to);
